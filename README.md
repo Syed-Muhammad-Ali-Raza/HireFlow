@@ -74,7 +74,7 @@ In Supabase → SQL Editor, run in order:
 
 ### 4. Storage (optional but recommended)
 
-Create a public (or signed-URL) Storage bucket named `resumes`. Without it, uploads still work but use a mock file URL.
+In Supabase → SQL Editor, also run `storage_resumes.sql` (or create a public bucket named `resumes` in the Storage UI). Without it, uploads still work but use a mock file URL.
 
 ### 5. Run
 

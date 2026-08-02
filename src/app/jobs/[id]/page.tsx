@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/utils/supabase/client';
+import { useToast } from '@/components/ToastProvider';
 
 interface Candidate {
   id: string;
@@ -38,6 +39,7 @@ export default function JobDashboardPage() {
   const router = useRouter();
   const { id: jobId } = useParams() as { id: string };
   const supabase = createClient();
+  const { success: toastSuccess, error: toastError } = useToast();
 
   const [job, setJob] = useState<JobPosting | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -65,12 +67,84 @@ export default function JobDashboardPage() {
 
   // Clipboard copy state
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
+  const [copyingInvite, setCopyingInvite] = useState(false);
 
-  const handleCopyInviteLink = (candidateId: string) => {
-    const inviteUrl = `${window.location.origin}/book/${candidateId}`;
-    navigator.clipboard.writeText(inviteUrl);
-    setCopiedInviteId(candidateId);
-    setTimeout(() => setCopiedInviteId(null), 2000);
+  // Edit / delete job
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editSkills, setEditSkills] = useState('');
+  const [savingJob, setSavingJob] = useState(false);
+  const [deletingJob, setDeletingJob] = useState(false);
+
+  const handleCopyInviteLink = async (candidateId: string) => {
+    setCopyingInvite(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/booking-link`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create booking link');
+      await navigator.clipboard.writeText(data.url);
+      setCopiedInviteId(candidateId);
+      toastSuccess('Signed booking link copied (expires in 7 days)');
+      setTimeout(() => setCopiedInviteId(null), 2000);
+    } catch (err: unknown) {
+      toastError(err instanceof Error ? err.message : 'Failed to copy invite link');
+    } finally {
+      setCopyingInvite(false);
+    }
+  };
+
+  const openEditJob = () => {
+    if (!job) return;
+    setEditTitle(job.title);
+    setEditDescription(job.description);
+    setEditSkills((job.required_skills || []).join(', '));
+    setIsEditOpen(true);
+  };
+
+  const handleSaveJob = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingJob(true);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: editTitle,
+          description: editDescription,
+          required_skills: editSkills,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update job');
+      setJob(data);
+      setIsEditOpen(false);
+      toastSuccess('Job updated');
+    } catch (err: unknown) {
+      toastError(err instanceof Error ? err.message : 'Failed to update job');
+    } finally {
+      setSavingJob(false);
+    }
+  };
+
+  const handleDeleteJob = async () => {
+    if (!job) return;
+    const confirmed = window.confirm(
+      `Delete "${job.title}" and all of its candidates? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setDeletingJob(true);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete job');
+      toastSuccess('Job deleted');
+      router.push('/');
+    } catch (err: unknown) {
+      toastError(err instanceof Error ? err.message : 'Failed to delete job');
+      setDeletingJob(false);
+    }
   };
 
   useEffect(() => {
@@ -193,8 +267,8 @@ export default function JobDashboardPage() {
       if (selectedCandidate && selectedCandidate.id === candId) {
         setSelectedCandidate(updated);
       }
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err: unknown) {
+      toastError(err instanceof Error ? err.message : 'Failed to update status');
     }
   };
 
@@ -233,8 +307,9 @@ export default function JobDashboardPage() {
         setSelectedCandidate(updated);
       }
       setIsOverrideModalOpen(false);
-    } catch (err: any) {
-      alert(err.message);
+      toastSuccess('Score override saved');
+    } catch (err: unknown) {
+      toastError(err instanceof Error ? err.message : 'Failed to override score');
     } finally {
       setOverriding(false);
     }
@@ -326,6 +401,23 @@ export default function JobDashboardPage() {
             <p className="text-[11px] text-slate-500 mt-1">
               Created on {new Date(job.created_at).toLocaleDateString()}
             </p>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={openEditJob}
+                className="px-3 py-1.5 rounded-lg border border-slate-800 text-[10px] font-semibold text-slate-400 hover:text-white hover:bg-slate-900 cursor-pointer"
+              >
+                Edit Job
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteJob}
+                disabled={deletingJob}
+                className="px-3 py-1.5 rounded-lg border border-red-900/40 text-[10px] font-semibold text-red-400 hover:bg-red-950/30 cursor-pointer disabled:opacity-50"
+              >
+                {deletingJob ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
           </div>
 
           {/* Drag & Drop File Upload */}
@@ -667,11 +759,71 @@ export default function JobDashboardPage() {
               </div>
               <button
                 onClick={() => handleCopyInviteLink(selectedCandidate.id)}
-                className="w-full text-center px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 transition-all cursor-pointer"
+                disabled={copyingInvite}
+                className="w-full text-center px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 transition-all cursor-pointer disabled:opacity-50"
               >
-                {copiedInviteId === selectedCandidate.id ? 'Copied Invite Link!' : 'Copy Candidate Interview Booking Link'}
+                {copiedInviteId === selectedCandidate.id
+                  ? 'Copied Invite Link!'
+                  : copyingInvite
+                    ? 'Generating signed link...'
+                    : 'Copy Candidate Interview Booking Link'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT JOB MODAL */}
+      {isEditOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm px-4">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-2xl relative">
+            <h3 className="text-lg font-bold text-white">Edit Job</h3>
+            <p className="text-xs text-slate-500 mt-1">Update title, skills, and description.</p>
+            <form onSubmit={handleSaveJob} className="mt-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Title</label>
+                <input
+                  required
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="mt-2 block w-full rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-2.5 text-sm text-white outline-none focus:border-violet-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Required skills (comma-separated)</label>
+                <input
+                  value={editSkills}
+                  onChange={(e) => setEditSkills(e.target.value)}
+                  className="mt-2 block w-full rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-2.5 text-sm text-white outline-none focus:border-violet-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Description</label>
+                <textarea
+                  rows={6}
+                  required
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className="mt-2 block w-full rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-2.5 text-sm text-white outline-none focus:border-violet-500 resize-none"
+                />
+              </div>
+              <div className="flex justify-end space-x-3 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setIsEditOpen(false)}
+                  className="px-4 py-2.5 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400 hover:bg-slate-800 hover:text-white cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingJob}
+                  className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 cursor-pointer disabled:opacity-50"
+                >
+                  {savingJob ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

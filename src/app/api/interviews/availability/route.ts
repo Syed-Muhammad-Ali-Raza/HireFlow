@@ -1,14 +1,35 @@
 import { NextResponse } from 'next/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { decryptToken, refreshGoogleAccessToken, getGoogleFreeBusy } from '@/lib/calendar';
+import { assertBookingAccess } from '@/lib/booking';
+import { checkRateLimit, clientIp } from '@/lib/rate-limit';
 
 export async function POST(request: Request) {
   try {
+    const limited = checkRateLimit(`availability:${clientIp(request)}`, 40);
+    if (!limited.ok) {
+      return NextResponse.json(
+        { error: 'Too many requests. Try again shortly.' },
+        { status: 429, headers: { 'Retry-After': String(limited.retryAfterSec) } }
+      );
+    }
+
     const body = await request.json();
-    const { candidate_id, interviewer_ids, timezone = 'UTC', durationMinutes = 45 } = body;
+    const {
+      candidate_id,
+      interviewer_ids,
+      timezone = 'UTC',
+      durationMinutes = 45,
+      token,
+    } = body;
 
     if (!candidate_id || !interviewer_ids || !Array.isArray(interviewer_ids) || interviewer_ids.length === 0) {
       return NextResponse.json({ error: 'candidate_id and interviewer_ids are required' }, { status: 400 });
+    }
+
+    const tokenError = assertBookingAccess(candidate_id, token);
+    if (tokenError) {
+      return NextResponse.json({ error: tokenError }, { status: 403 });
     }
 
     // 1. Initialize Supabase Admin to read profiles refresh tokens

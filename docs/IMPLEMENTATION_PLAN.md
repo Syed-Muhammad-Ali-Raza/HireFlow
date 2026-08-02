@@ -29,28 +29,28 @@ This plan covers: what exists today → next phases → how to scale → chatbot
 
 ## 1. Recommended phase roadmap
 
-### Phase 1 — Stabilize foundation (1–2 weeks) — DO THIS FIRST
+### Phase 1 — Stabilize foundation ✅ COMPLETED
 
 Goal: reliable local + staging demo for one company.
 
-| # | Work item | Why |
-|---|-----------|-----|
-| 1.1 | Fill `.env.local`, apply `schema.sql` + `migration_phase2.sql` | App cannot run without DB/auth |
-| 1.2 | Create Storage bucket `resumes` + policies | Real resume URLs |
-| 1.3 | Middleware route protection (redirect unauthenticated away from `/jobs/*`, `/settings/*`) | Security |
-| 1.4 | Complete `.env.local.example` (Google + encryption + `NEXT_PUBLIC_APP_URL`) | Onboarding |
-| 1.5 | Job edit / delete UI wired to existing APIs/RLS | Basic CRUD completeness |
-| 1.6 | Extract candidate name/email from resume text (AI or regex) | Better candidate records |
-| 1.7 | Interviews list page using `GET /api/interviews` | Close Phase-2 UX gap |
-| 1.8 | Harden public booking (signed tokens / short-lived links, rate limits) | Security before sharing links |
-| 1.9 | Basic error boundaries + toast consistency | Polish |
-| 1.10 | Smoke test checklist (manual) documented in ONBOARDING | Quality |
+| # | Work item | Status |
+|---|-----------|--------|
+| 1.1 | Fill `.env.local`, apply SQL | Ops (user configures keys) |
+| 1.2 | Storage bucket `resumes` | Documented in README; create in Supabase |
+| 1.3 | Middleware route protection | Done — `/jobs`, `/settings`, `/interviews` |
+| 1.4 | Complete `.env.local.example` | Done (+ Google, booking secret) |
+| 1.5 | Job edit / delete UI + API | Done — PATCH/DELETE `/api/jobs/[id]` |
+| 1.6 | Extract name/email from resume | Done — `lib/resume-parse.ts` |
+| 1.7 | Interviews list page | Done — `/interviews` |
+| 1.8 | Signed booking links | Done — HMAC token, 7-day expiry |
+| 1.9 | Toasts + error boundary | Done — `ToastProvider`, `app/error.tsx` |
+| 1.10 | Smoke test checklist | Done — in ONBOARDING.md |
 
-**Exit criteria:** New recruiter can sign up → create company → post job → upload 3 PDFs → shortlist → connect Calendar → candidate books Meet — end to end on staging.
+**Exit criteria:** New recruiter can sign up → create company → post job → upload PDFs → shortlist → connect Calendar → candidate books Meet — end to end on staging.
 
 ---
 
-### Phase 2 — Multi-user & roles (2–3 weeks) — REQUIRED BEFORE ADDING PEOPLE
+### Phase 2 — Multi-user & roles (2–3 weeks) — NEXT
 
 Goal: safely add admins, recruiters, interviewers to the same company.
 

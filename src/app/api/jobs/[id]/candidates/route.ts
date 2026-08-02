@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { extractTextFromPdf } from '@/lib/pdf';
 import { evaluateResume } from '@/lib/ai';
+import { extractContactFromResume } from '@/lib/resume-parse';
 
 // GET: List all candidates for a specific job posting, sorted by score descending
 export async function GET(
@@ -124,9 +125,11 @@ export async function POST(
       return NextResponse.json({ error: `AI ranking failed: ${aiErr.message}` }, { status: 502 });
     }
 
-    // Clean inputs or extract from filename
-    const candidateName = nameInput?.trim() || file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
-    const candidateEmail = emailInput?.trim() || '';
+    // Prefer form inputs → resume text extraction → filename stem
+    const extracted = extractContactFromResume(resumeText);
+    const filenameStem = file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ').trim();
+    const candidateName = nameInput?.trim() || extracted.name || filenameStem || 'Unknown Candidate';
+    const candidateEmail = emailInput?.trim() || extracted.email || '';
 
     // 7. Save candidate records in DB
     const { data: candidate, error: saveError } = await supabase
