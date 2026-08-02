@@ -54,11 +54,14 @@ export default function InterviewsPage() {
     load();
   }, [router, supabase, toastError]);
 
+  const [nowMs] = useState(() => Date.now());
+  const cutoff = nowMs - 60 * 60 * 1000;
+
   const upcoming = interviews.filter(
-    (i) => new Date(i.scheduled_time).getTime() >= Date.now() - 60 * 60 * 1000
+    (i) => new Date(i.scheduled_time).getTime() >= cutoff
   );
   const past = interviews.filter(
-    (i) => new Date(i.scheduled_time).getTime() < Date.now() - 60 * 60 * 1000
+    (i) => new Date(i.scheduled_time).getTime() < cutoff
   );
 
   const statusStyles = (status: string) => {
