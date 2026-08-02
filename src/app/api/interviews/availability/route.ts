@@ -1,0 +1,139 @@
+import { NextResponse } from 'next/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { decryptToken, refreshGoogleAccessToken, getGoogleFreeBusy } from '@/lib/calendar';
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const { candidate_id, interviewer_ids, timezone = 'UTC', durationMinutes = 45 } = body;
+
+    if (!candidate_id || !interviewer_ids || !Array.isArray(interviewer_ids) || interviewer_ids.length === 0) {
+      return NextResponse.json({ error: 'candidate_id and interviewer_ids are required' }, { status: 400 });
+    }
+
+    // 1. Initialize Supabase Admin to read profiles refresh tokens
+    const supabaseAdmin = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // 2. Fetch all interviewers' tokens and emails
+    const { data: profiles, error: profilesError } = await supabaseAdmin
+      .from('profiles')
+      .select('id, email, calendar_connected, calendar_refresh_token')
+      .in('id', interviewer_ids);
+
+    if (profilesError || !profiles || profiles.length === 0) {
+      return NextResponse.json({ error: 'Could not fetch interviewer calendar details' }, { status: 400 });
+    }
+
+    const connectedProfiles = profiles.filter(p => p.calendar_connected && p.calendar_refresh_token);
+    if (connectedProfiles.length === 0) {
+      return NextResponse.json({ error: 'No interviewers have connected calendars' }, { status: 400 });
+    }
+
+    // 3. Define the scheduling window (e.g. next 5 days, starting tomorrow)
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() + 1); // Start tomorrow
+    startDate.setHours(9, 0, 0, 0); // start at 9:00 AM
+
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 5); // search up to 5 days ahead
+    endDate.setHours(17, 0, 0, 0); // end at 5:00 PM
+
+    const timeMin = startDate.toISOString();
+    const timeMax = endDate.toISOString();
+
+    // 4. Query busy periods for each interviewer in parallel
+    const busyIntervalsList: { start: string; end: string }[][] = [];
+
+    for (const profile of connectedProfiles) {
+      try {
+        const decryptedToken = decryptToken(profile.calendar_refresh_token!);
+        const accessToken = await refreshGoogleAccessToken(decryptedToken);
+        const busy = await getGoogleFreeBusy(accessToken, profile.email, timeMin, timeMax);
+        busyIntervalsList.push(busy);
+      } catch (tokenErr) {
+        console.error(`Failed to fetch calendar data for interviewer ${profile.email}:`, tokenErr);
+        // If one interviewer has connection failure, we continue with others or throw
+        return NextResponse.json({ error: `Interviewer ${profile.email} calendar could not be queried` }, { status: 502 });
+      }
+    }
+
+    // 5. Generate possible slot starts in 30-minute intervals
+    const possibleSlots: Date[] = [];
+    let currentSlot = new Date(startDate);
+
+    while (currentSlot < endDate) {
+      // Check if slot falls inside business hours in target timezone
+      if (isBusinessHours(currentSlot, timezone)) {
+        possibleSlots.push(new Date(currentSlot));
+      }
+      currentSlot.setMinutes(currentSlot.getMinutes() + 30);
+    }
+
+    // Filter slots that do not overlap with any busy intervals
+    const availableSlots: string[] = [];
+
+    for (const slotStart of possibleSlots) {
+      const slotEnd = new Date(slotStart);
+      slotEnd.setMinutes(slotEnd.getMinutes() + durationMinutes);
+
+      let isOverlap = false;
+
+      // Check against all busy intervals of all interviewers
+      for (const busyList of busyIntervalsList) {
+        for (const busy of busyList) {
+          const busyStart = new Date(busy.start);
+          const busyEnd = new Date(busy.end);
+
+          // Overlap check: slotStart < busyEnd AND slotEnd > busyStart
+          if (slotStart < busyEnd && slotEnd > busyStart) {
+            isOverlap = true;
+            break;
+          }
+        }
+        if (isOverlap) break;
+      }
+
+      if (!isOverlap) {
+        availableSlots.push(slotStart.toISOString());
+      }
+    }
+
+    return NextResponse.json({ availableSlots });
+  } catch (error: any) {
+    console.error('Availability API error:', error);
+    return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+// Timezone business hour helpers
+function getHourInTimezone(date: Date, tz: string): number {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hour: 'numeric',
+    hour12: false,
+  });
+  return Number(formatter.format(date));
+}
+
+function isBusinessHours(date: Date, tz: string): boolean {
+  try {
+    const formatterDay = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' });
+    const day = formatterDay.format(date);
+    
+    // Skip weekends
+    if (day === 'Sat' || day === 'Sun') return false;
+
+    const hour = getHourInTimezone(date, tz);
+    // Business hours between 9:00 AM and 5:00 PM (17:00)
+    return hour >= 9 && hour < 17;
+  } catch (err) {
+    // If invalid timezone, default to UTC
+    const hour = date.getUTCHours();
+    const day = date.getUTCDay();
+    if (day === 0 || day === 6) return false;
+    return hour >= 9 && hour < 17;
+  }
+}
