@@ -297,6 +297,12 @@ export default function HomePage() {
                 Logged in as <strong className="text-slate-200">{profile?.name || session.user.email}</strong>
               </span>
               <Link
+                href="/interviews"
+                className="px-4 py-1.5 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400 hover:bg-slate-900 hover:text-white hover:border-slate-700 transition-all"
+              >
+                Interviews
+              </Link>
+              <Link
                 href="/settings/integrations"
                 className="px-4 py-1.5 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400 hover:bg-slate-900 hover:text-white hover:border-slate-700 transition-all"
               >

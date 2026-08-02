@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Inter, Outfit } from 'next/font/google';
+import { ToastProvider } from '@/components/ToastProvider';
 import './globals.css';
 
 const inter = Inter({
@@ -31,7 +32,7 @@ export default function RootLayout({
       style={{ colorScheme: 'dark' }}
     >
       <body className="min-h-full bg-slate-950 text-slate-100 font-sans flex flex-col">
-        {children}
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   );

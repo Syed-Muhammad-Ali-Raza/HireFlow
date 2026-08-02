@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { assertBookingAccess } from '@/lib/booking';
+import { checkRateLimit, clientIp } from '@/lib/rate-limit';
 
 export async function GET(
   request: Request,
@@ -8,13 +10,27 @@ export async function GET(
   try {
     const { candidateId } = await params;
 
-    // Initialize Supabase Admin to query candidate details anonymously
+    const limited = checkRateLimit(`book:${clientIp(request)}:${candidateId}`, 40);
+    if (!limited.ok) {
+      return NextResponse.json(
+        { error: 'Too many requests. Try again shortly.' },
+        { status: 429, headers: { 'Retry-After': String(limited.retryAfterSec) } }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const token = searchParams.get('token');
+
+    const tokenError = assertBookingAccess(candidateId, token);
+    if (tokenError) {
+      return NextResponse.json({ error: tokenError }, { status: 403 });
+    }
+
     const supabaseAdmin = createSupabaseClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // 1. Fetch Candidate
     const { data: candidate, error: candidateError } = await supabaseAdmin
       .from('candidates')
       .select('id, name, email, job_id')
@@ -25,7 +41,6 @@ export async function GET(
       return NextResponse.json({ error: 'Candidate not found or link has expired' }, { status: 404 });
     }
 
-    // 2. Fetch Job Details & Company ID
     const { data: job, error: jobError } = await supabaseAdmin
       .from('job_postings')
       .select('title, company_id')
@@ -36,14 +51,12 @@ export async function GET(
       return NextResponse.json({ error: 'Associated job posting not found' }, { status: 404 });
     }
 
-    // 3. Fetch Company Details
     const { data: company } = await supabaseAdmin
       .from('companies')
       .select('name')
       .eq('id', job.company_id)
       .single();
 
-    // 4. Fetch Connected Interviewers in the company to check availability against
     const { data: interviewers } = await supabaseAdmin
       .from('profiles')
       .select('id, name, email')
@@ -64,8 +77,9 @@ export async function GET(
       },
       interviewers: interviewers || [],
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Public Book Detail Error:', error);
-    return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Internal Server Error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
