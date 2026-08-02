@@ -177,6 +177,26 @@ Candidates are **not** auth users today.
 
 ---
 
+## Phase 1 smoke test checklist
+
+Run through this after setup (`.env.local` + SQL + optional Storage/AI/Google):
+
+- [ ] `npm run dev` opens landing page without console crash  
+- [ ] Unauthenticated visit to `/jobs/new` redirects to `/login`  
+- [ ] Sign up → create company → land on Active Jobs  
+- [ ] Create a job with title, skills, description  
+- [ ] Open job → **Edit Job** works; changes persist after reload  
+- [ ] Upload 1–3 sample PDF resumes → scores appear; name/email often filled from resume text  
+- [ ] Shortlist / reject / override score; toast appears (no browser `alert`)  
+- [ ] **Settings → Integrations** → connect Google Calendar (if credentials set)  
+- [ ] Copy booking invite link from candidate drawer → URL contains `?token=`  
+- [ ] Open link in private window → pick slot → interview created (needs Calendar)  
+- [ ] Dashboard → **Interviews** shows the booked meeting  
+- [ ] Booking URL without `token` shows an error (not candidate data)  
+- [ ] Delete job (confirm) → returns to dashboard  
+
+---
+
 ## Part E — Security when adding people
 
 | Do | Don’t |
