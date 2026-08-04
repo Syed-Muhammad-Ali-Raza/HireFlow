@@ -15,7 +15,7 @@ interface Candidate {
   match_reasoning: string;
   matched_skills: string[];
   missing_skills: string[];
-  status: 'new' | 'shortlisted' | 'rejected' | 'interview_scheduled';
+  status: 'new' | 'shortlisted' | 'rejected' | 'interview_scheduled' | 'offer';
   created_at: string;
   assigned_interviewer_ids?: string[] | null;
 }
@@ -82,6 +82,27 @@ export default function JobDashboardPage() {
   const [currentUserRole, setCurrentUserRole] = useState<string>('recruiter');
   const [assigningInterviewerId, setAssigningInterviewerId] = useState<string | null>(null);
 
+  const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
+  const [activeDrawerTab, setActiveDrawerTab] = useState<'details' | 'evaluations'>('details');
+
+  // Candidate evaluations
+  const [notes, setNotes] = useState<any[]>([]);
+  const [newNote, setNewNote] = useState('');
+  const [submittingNote, setSubmittingNote] = useState(false);
+
+  const [scorecards, setScorecards] = useState<any[]>([]);
+  const [newRating, setNewRating] = useState<number>(5);
+  const [newFeedback, setNewFeedback] = useState('');
+  const [submittingScorecard, setSubmittingScorecard] = useState(false);
+
+  const averageRatingVal = scorecards.length > 0
+    ? Math.round(scorecards.reduce((sum, sc) => sum + sc.overall_rating, 0) / scorecards.length)
+    : 0;
+
+  const averageRatingString = scorecards.length > 0
+    ? (scorecards.reduce((sum, sc) => sum + sc.overall_rating, 0) / scorecards.length).toFixed(1)
+    : '0.0';
+
   const handleCopyInviteLink = async (candidateId: string) => {
     setCopyingInvite(true);
     try {
@@ -96,6 +117,111 @@ export default function JobDashboardPage() {
       toastError(err instanceof Error ? err.message : 'Failed to copy invite link');
     } finally {
       setCopyingInvite(false);
+    }
+  };
+
+  // Load candidate evaluation details (Notes and Scorecards)
+  useEffect(() => {
+    if (!selectedCandidate) {
+      setNotes([]);
+      setScorecards([]);
+      setActiveDrawerTab('details');
+      return;
+    }
+
+    const candidateId = selectedCandidate.id;
+
+    async function loadEvaluations() {
+      try {
+        const [notesRes, scorecardsRes] = await Promise.all([
+          fetch(`/api/candidates/${candidateId}/notes`),
+          fetch(`/api/candidates/${candidateId}/scorecards`),
+        ]);
+
+        if (notesRes.ok) {
+          const notesData = await notesRes.json();
+          setNotes(notesData);
+        }
+        if (scorecardsRes.ok) {
+          const scorecardsData = await scorecardsRes.json();
+          setScorecards(scorecardsData);
+        }
+      } catch (err) {
+        console.error('Failed to load candidate evaluations:', err);
+      }
+    }
+
+    loadEvaluations();
+  }, [selectedCandidate?.id]);
+
+  const handleDuplicateJob = async () => {
+    if (!job) return;
+    if (!window.confirm('Are you sure you want to duplicate this job posting?')) return;
+
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/duplicate`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to duplicate job');
+      toastSuccess('Job duplicated successfully!');
+      router.push(`/jobs/${data.id}`);
+    } catch (err: any) {
+      toastError(err.message || 'Failed to duplicate job.');
+    }
+  };
+
+  const handlePostNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCandidate || !newNote.trim()) return;
+
+    setSubmittingNote(true);
+    try {
+      const res = await fetch(`/api/candidates/${selectedCandidate.id}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: newNote.trim() }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || 'Failed to post note');
+
+      setNotes((prev) => [...prev, data]);
+      setNewNote('');
+      toastSuccess('Comment added.');
+    } catch (err: any) {
+      toastError(err.message || 'Failed to add comment.');
+    } finally {
+      setSubmittingNote(false);
+    }
+  };
+
+  const handlePostScorecard = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCandidate) return;
+
+    setSubmittingScorecard(true);
+    try {
+      const res = await fetch(`/api/candidates/${selectedCandidate.id}/scorecards`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          overall_rating: newRating,
+          feedback: newFeedback.trim(),
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || 'Failed to submit scorecard');
+
+      setScorecards((prev) => {
+        const filtered = prev.filter((s) => s.profile_id !== data.profile_id);
+        return [...filtered, data];
+      });
+      setNewFeedback('');
+      toastSuccess('Scorecard submitted.');
+    } catch (err: any) {
+      toastError(err.message || 'Failed to submit scorecard.');
+    } finally {
+      setSubmittingScorecard(false);
     }
   };
 
@@ -423,13 +549,20 @@ export default function JobDashboardPage() {
             <p className="text-[11px] text-slate-500 mt-1">
               Created on {new Date(job.created_at).toLocaleDateString()}
             </p>
-            <div className="mt-3 flex items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={openEditJob}
                 className="px-3 py-1.5 rounded-lg border border-slate-800 text-[10px] font-semibold text-slate-400 hover:text-white hover:bg-slate-900 cursor-pointer"
               >
                 Edit Job
+              </button>
+              <button
+                type="button"
+                onClick={handleDuplicateJob}
+                className="px-3 py-1.5 rounded-lg border border-violet-900/40 text-[10px] font-semibold text-violet-400 hover:bg-violet-950/30 cursor-pointer"
+              >
+                Duplicate
               </button>
               <button
                 type="button"
@@ -529,8 +662,34 @@ export default function JobDashboardPage() {
               />
             </div>
 
-            {/* Filter selectors */}
-            <div className="flex items-center space-x-3 text-xs">
+            {/* Filter selectors & View toggle */}
+            <div className="flex flex-wrap items-center gap-4 text-xs">
+              {/* View Toggle */}
+              <div className="flex items-center rounded-xl bg-slate-900/50 p-1 border border-slate-800/80">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all ${
+                    viewMode === 'list'
+                      ? 'bg-violet-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  List
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('kanban')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all ${
+                    viewMode === 'kanban'
+                      ? 'bg-violet-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Kanban
+                </button>
+              </div>
+
               {/* Status Filter */}
               <div className="flex items-center space-x-2">
                 <span className="text-slate-500">Status:</span>
@@ -544,6 +703,7 @@ export default function JobDashboardPage() {
                   <option value="shortlisted">Shortlisted</option>
                   <option value="interview_scheduled">Interviewing</option>
                   <option value="rejected">Rejected</option>
+                  <option value="offer">Offer Extended</option>
                 </select>
               </div>
 
@@ -563,86 +723,229 @@ export default function JobDashboardPage() {
             </div>
           </div>
 
-          {/* Table Container */}
-          <div className="flex-1 overflow-y-auto mt-6">
-            {filteredCandidates.length === 0 ? (
-              <div className="text-center py-20 flex flex-col items-center">
-                <svg className="w-10 h-10 text-slate-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-                <p className="text-sm text-slate-500 font-medium">No candidates match your criteria.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {filteredCandidates.map((cand) => (
-                  <div
-                    key={cand.id}
-                    onClick={() => setSelectedCandidate(cand)}
-                    className="bg-slate-900/30 hover:bg-slate-900/60 border border-slate-900 hover:border-slate-800/80 rounded-2xl p-4.5 transition-all flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer relative overflow-hidden group shadow-lg"
-                  >
-                    <div className="flex items-center space-x-4">
-                      {/* Score Circle Badge */}
-                      <div className={`h-12 w-12 rounded-xl flex flex-col items-center justify-center border font-display font-extrabold shrink-0 shadow-inner ${getScoreBadgeStyles(cand.match_score)}`}>
-                        <span className="text-sm">{cand.match_score}</span>
-                        <span className="text-[7px] uppercase tracking-wider font-semibold opacity-70">match</span>
-                      </div>
+          {/* Table / Kanban Container */}
+          <div className="flex-1 overflow-hidden flex flex-col mt-6">
+            {viewMode === 'list' ? (
+              <div className="flex-1 overflow-y-auto">
+                {filteredCandidates.length === 0 ? (
+                  <div className="text-center py-20 flex flex-col items-center">
+                    <svg className="w-10 h-10 text-slate-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                    </svg>
+                    <p className="text-sm text-slate-500 font-medium">No candidates match your criteria.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {filteredCandidates.map((cand) => (
+                      <div
+                        key={cand.id}
+                        onClick={() => setSelectedCandidate(cand)}
+                        className="bg-slate-900/30 hover:bg-slate-900/60 border border-slate-900 hover:border-slate-800/80 rounded-2xl p-4.5 transition-all flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer relative overflow-hidden group shadow-lg"
+                      >
+                        <div className="flex items-center space-x-4">
+                          {/* Score Circle Badge */}
+                          <div className={`h-12 w-12 rounded-xl flex flex-col items-center justify-center border font-display font-extrabold shrink-0 shadow-inner ${getScoreBadgeStyles(cand.match_score)}`}>
+                            <span className="text-sm">{cand.match_score}</span>
+                            <span className="text-[7px] uppercase tracking-wider font-semibold opacity-70">match</span>
+                          </div>
 
-                      {/* Details */}
-                      <div>
-                        <h4 className="font-bold text-white group-hover:text-violet-400 transition-colors text-sm">{cand.name}</h4>
-                        <div className="flex items-center space-x-3 text-xs text-slate-500 mt-1 font-medium">
-                          <span className="truncate max-w-[180px]">{cand.email || 'No email provided'}</span>
-                          <span className="h-1.5 w-1.5 rounded-full bg-slate-800" />
-                          <span>Uploaded {new Date(cand.created_at).toLocaleDateString()}</span>
+                          {/* Details */}
+                          <div>
+                            <h4 className="font-bold text-white group-hover:text-violet-400 transition-colors text-sm">{cand.name}</h4>
+                            <div className="flex items-center space-x-3 text-xs text-slate-500 mt-1 font-medium">
+                              <span className="truncate max-w-[180px]">{cand.email || 'No email provided'}</span>
+                              <span className="h-1.5 w-1.5 rounded-full bg-slate-800" />
+                              <span>Uploaded {new Date(cand.created_at).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Actions and Status pills */}
+                        <div className="flex items-center space-x-3 mt-4 sm:mt-0 shrink-0 self-end sm:self-auto relative z-10" onClick={(e) => e.stopPropagation()}>
+                          {/* Status Badges */}
+                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${
+                            cand.status === 'shortlisted' ? 'bg-emerald-950/40 text-emerald-400 border-emerald-900/40' :
+                            cand.status === 'rejected' ? 'bg-red-950/40 text-red-400 border-red-900/40' :
+                            cand.status === 'interview_scheduled' ? 'bg-blue-950/40 text-blue-400 border-blue-900/40' :
+                            cand.status === 'offer' ? 'bg-amber-950/40 text-amber-400 border-amber-900/40' :
+                            'bg-slate-900 text-slate-400 border-slate-800'
+                          }`}>
+                            {cand.status === 'interview_scheduled' ? 'Interviewing' : cand.status === 'offer' ? 'Offer' : cand.status}
+                          </span>
+
+                          {/* Quick Actions Menu */}
+                          <div className="flex items-center border border-slate-800 rounded-xl overflow-hidden bg-slate-950/40">
+                            <button
+                              onClick={() => updateCandidateStatus(cand.id, 'shortlisted')}
+                              title="Shortlist Candidate"
+                              className="p-2 text-slate-500 hover:text-emerald-400 hover:bg-slate-900 transition-all border-r border-slate-800"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => updateCandidateStatus(cand.id, 'interview_scheduled')}
+                              title="Set to Interviewing"
+                              className="p-2 text-slate-500 hover:text-blue-400 hover:bg-slate-900 transition-all border-r border-slate-800"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => updateCandidateStatus(cand.id, 'offer')}
+                              title="Extend Offer"
+                              className="p-2 text-slate-500 hover:text-amber-400 hover:bg-slate-900 transition-all border-r border-slate-800"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => updateCandidateStatus(cand.id, 'rejected')}
+                              title="Reject Candidate"
+                              className="p-2 text-slate-500 hover:text-red-400 hover:bg-slate-900 transition-all border-r border-slate-800"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={(e) => handleOpenOverride(cand, e)}
+                              title="Manual Score Override"
+                              className="p-2 text-slate-500 hover:text-violet-400 hover:bg-slate-900 transition-all"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* KANBAN BOARD VIEW */
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-5 gap-4 overflow-hidden min-h-0">
+                {(['new', 'shortlisted', 'interview_scheduled', 'offer', 'rejected'] as const).map((colStatus) => {
+                  const colCandidates = filteredCandidates.filter((c) => c.status === colStatus);
+                  const columnTitle = {
+                    new: 'New',
+                    shortlisted: 'Shortlisted',
+                    interview_scheduled: 'Interviewing',
+                    offer: 'Offer',
+                    rejected: 'Rejected',
+                  }[colStatus];
 
-                    {/* Actions and Status pills */}
-                    <div className="flex items-center space-x-3 mt-4 sm:mt-0 shrink-0 self-end sm:self-auto relative z-10" onClick={(e) => e.stopPropagation()}>
-                      {/* Status Badges */}
-                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${
-                        cand.status === 'shortlisted' ? 'bg-emerald-950/40 text-emerald-400 border-emerald-900/40' :
-                        cand.status === 'rejected' ? 'bg-red-950/40 text-red-400 border-red-900/40' :
-                        cand.status === 'interview_scheduled' ? 'bg-blue-950/40 text-blue-400 border-blue-900/40' :
-                        'bg-slate-900 text-slate-400 border-slate-800'
-                      }`}>
-                        {cand.status === 'interview_scheduled' ? 'Interviewing' : cand.status}
-                      </span>
+                  const columnHeaderColor = {
+                    new: 'text-slate-400',
+                    shortlisted: 'text-emerald-400',
+                    interview_scheduled: 'text-blue-400',
+                    offer: 'text-amber-400',
+                    rejected: 'text-red-400',
+                  }[colStatus];
 
-                      {/* Quick Actions Menu */}
-                      <div className="flex items-center border border-slate-800 rounded-xl overflow-hidden bg-slate-950/40">
-                        <button
-                          onClick={() => updateCandidateStatus(cand.id, 'shortlisted')}
-                          title="Shortlist Candidate"
-                          className="p-2 text-slate-500 hover:text-emerald-400 hover:bg-slate-900 transition-all border-r border-slate-800"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => updateCandidateStatus(cand.id, 'rejected')}
-                          title="Reject Candidate"
-                          className="p-2 text-slate-500 hover:text-red-400 hover:bg-slate-900 transition-all border-r border-slate-800"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={(e) => handleOpenOverride(cand, e)}
-                          title="Manual Score Override"
-                          className="p-2 text-slate-500 hover:text-violet-400 hover:bg-slate-900 transition-all"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                        </button>
+                  return (
+                    <div
+                      key={colStatus}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const candidateId = e.dataTransfer.getData('text/plain');
+                        if (candidateId) {
+                          updateCandidateStatus(candidateId, colStatus);
+                        }
+                      }}
+                      className="bg-slate-900/10 border border-slate-900/80 rounded-2xl p-3.5 flex flex-col min-h-0 h-full"
+                    >
+                      <div className="flex items-center justify-between shrink-0 mb-3 pb-2 border-b border-slate-900/60">
+                        <span className={`font-bold text-[10px] uppercase tracking-wider ${columnHeaderColor}`}>
+                          {columnTitle}
+                        </span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-900 text-slate-500 border border-slate-850 font-bold">
+                          {colCandidates.length}
+                        </span>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 min-h-0">
+                        {colCandidates.map((cand) => (
+                          <div
+                            key={cand.id}
+                            draggable
+                            onDragStart={(e) => e.dataTransfer.setData('text/plain', cand.id)}
+                            onClick={() => setSelectedCandidate(cand)}
+                            className="bg-slate-900/40 hover:bg-slate-900/70 border border-slate-900 hover:border-slate-800/80 p-3.5 rounded-xl cursor-grab active:cursor-grabbing transition-all relative overflow-hidden group shadow-md"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-bold text-white text-xs group-hover:text-violet-400 transition-colors truncate max-w-[100px]">
+                                {cand.name}
+                              </span>
+                              <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded shrink-0 ${getScoreBadgeStyles(cand.match_score)}`}>
+                                {cand.match_score}%
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-500 truncate mt-1">{cand.email || 'No email'}</p>
+
+                            {/* Column action selectors/buttons */}
+                            <div className="mt-3 pt-2 border-t border-slate-950 flex justify-between items-center text-[9px] opacity-0 group-hover:opacity-100 transition-opacity">
+                              <span className="text-slate-500">Move to:</span>
+                              <div className="flex gap-1">
+                                {colStatus !== 'new' && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); updateCandidateStatus(cand.id, 'new'); }}
+                                    className="px-1 py-0.5 hover:bg-slate-850 hover:text-white rounded border border-slate-900 text-slate-400 font-semibold"
+                                    title="New"
+                                  >
+                                    N
+                                  </button>
+                                )}
+                                {colStatus !== 'shortlisted' && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); updateCandidateStatus(cand.id, 'shortlisted'); }}
+                                    className="px-1 py-0.5 hover:bg-emerald-950/40 hover:text-emerald-400 rounded border border-slate-900 text-slate-400 font-semibold"
+                                    title="Shortlist"
+                                  >
+                                    S
+                                  </button>
+                                )}
+                                {colStatus !== 'interview_scheduled' && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); updateCandidateStatus(cand.id, 'interview_scheduled'); }}
+                                    className="px-1 py-0.5 hover:bg-blue-950/40 hover:text-blue-400 rounded border border-slate-900 text-slate-400 font-semibold"
+                                    title="Interview"
+                                  >
+                                    I
+                                  </button>
+                                )}
+                                {colStatus !== 'offer' && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); updateCandidateStatus(cand.id, 'offer'); }}
+                                    className="px-1 py-0.5 hover:bg-amber-950/40 hover:text-amber-400 rounded border border-slate-900 text-slate-400 font-semibold"
+                                    title="Offer"
+                                  >
+                                    O
+                                  </button>
+                                )}
+                                {colStatus !== 'rejected' && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); updateCandidateStatus(cand.id, 'rejected'); }}
+                                    className="px-1 py-0.5 hover:bg-red-950/40 hover:text-red-400 rounded border border-slate-900 text-slate-400 font-semibold"
+                                    title="Reject"
+                                  >
+                                    R
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -678,154 +981,317 @@ export default function JobDashboardPage() {
               </button>
             </div>
 
+            {/* Tab Switcher */}
+            <div className="flex border-b border-slate-900 mt-4 shrink-0">
+              <button
+                type="button"
+                onClick={() => setActiveDrawerTab('details')}
+                className={`flex-1 text-center py-2.5 text-xs font-semibold border-b-2 cursor-pointer transition-all ${
+                  activeDrawerTab === 'details'
+                    ? 'border-violet-500 text-white'
+                    : 'border-transparent text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                Overview
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveDrawerTab('evaluations')}
+                className={`flex-1 text-center py-2.5 text-xs font-semibold border-b-2 cursor-pointer transition-all ${
+                  activeDrawerTab === 'evaluations'
+                    ? 'border-violet-500 text-white'
+                    : 'border-transparent text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                Notes & Scorecards
+              </button>
+            </div>
+
             {/* Scrollable Body */}
             <div className="flex-1 overflow-y-auto py-6 space-y-6 min-h-0 pr-1">
-              {/* Match reasoning */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">AI Match Reasoning</h4>
-                <p className="text-sm text-slate-300 leading-relaxed bg-slate-950/40 border border-slate-950 p-4 rounded-2xl whitespace-pre-wrap">
-                  {selectedCandidate.match_reasoning}
-                </p>
-              </div>
-
-              {/* Core Skills match */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-emerald-950/10 border border-emerald-900/20 p-4.5 rounded-2xl flex flex-col">
-                  <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2.5">Matched Skills</span>
-                  {selectedCandidate.matched_skills.length === 0 ? (
-                    <span className="text-xs text-slate-500 font-medium">None identified</span>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {selectedCandidate.matched_skills.map((skill, i) => (
-                        <span key={i} className="text-[10px] font-semibold bg-emerald-950/40 border border-emerald-900/40 text-emerald-400 px-2 py-0.5 rounded">
-                          {skill}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="bg-red-950/10 border border-red-900/20 p-4.5 rounded-2xl flex flex-col">
-                  <span className="text-xs font-bold text-red-400 uppercase tracking-wider mb-2.5">Missing Skills</span>
-                  {selectedCandidate.missing_skills.length === 0 ? (
-                    <span className="text-xs text-slate-500 font-medium">None identified</span>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {selectedCandidate.missing_skills.map((skill, i) => (
-                        <span key={i} className="text-[10px] font-semibold bg-red-950/40 border border-red-900/40 text-red-400 px-2 py-0.5 rounded">
-                          {skill}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Assign Interviewers Section */}
-              <div className="border-t border-slate-800 pt-6">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Assign Interviewers</h4>
-                {teamMembers.length === 0 ? (
-                  <p className="text-xs text-slate-500">No team members available.</p>
-                ) : (
-                  <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
-                    {teamMembers.map((member) => {
-                      const isAssigned = selectedCandidate.assigned_interviewer_ids?.includes(member.id) || false;
-                      return (
-                        <label
-                          key={member.id}
-                          className="flex items-center space-x-3 text-xs text-slate-300 hover:text-white cursor-pointer select-none"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isAssigned}
-                            disabled={assigningInterviewerId === member.id}
-                            onChange={async () => {
-                              setAssigningInterviewerId(member.id);
-                              try {
-                                let newIds = [...(selectedCandidate.assigned_interviewer_ids || [])];
-                                if (isAssigned) {
-                                  newIds = newIds.filter((id) => id !== member.id);
-                                } else {
-                                  newIds.push(member.id);
-                                }
-
-                                const res = await fetch(`/api/candidates/${selectedCandidate.id}`, {
-                                  method: 'PATCH',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ assigned_interviewer_ids: newIds }),
-                                });
-                                const updatedCandidate = await res.json();
-                                if (!res.ok) throw new Error(updatedCandidate.error || 'Failed to update interviewers');
-
-                                // Update state
-                                setCandidates((prev) =>
-                                  prev.map((c) =>
-                                    c.id === selectedCandidate.id
-                                      ? { ...c, assigned_interviewer_ids: newIds }
-                                      : c
-                                  )
-                                );
-                                setSelectedCandidate((prev) =>
-                                  prev ? { ...prev, assigned_interviewer_ids: newIds } : null
-                                );
-                                toastSuccess(isAssigned ? 'Interviewer unassigned' : 'Interviewer assigned');
-                              } catch (err: any) {
-                                toastError(err.message || 'Failed to update assignment');
-                              } finally {
-                                setAssigningInterviewerId(null);
-                              }
-                            }}
-                            className="rounded border-slate-800 bg-slate-950 text-violet-600 focus:ring-violet-500 focus:ring-offset-slate-950"
-                          />
-                          <div className="flex flex-col">
-                            <span className="font-semibold">{member.name || member.email}</span>
-                            <span className="text-[10px] text-slate-500 uppercase tracking-wider">
-                              {member.role} {member.calendar_connected && '• Calendar Connected'}
-                            </span>
-                          </div>
-                        </label>
-                      );
-                    })}
+              {activeDrawerTab === 'details' ? (
+                <>
+                  {/* Match reasoning */}
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">AI Match Reasoning</h4>
+                    <p className="text-sm text-slate-300 leading-relaxed bg-slate-950/40 border border-slate-950 p-4 rounded-2xl whitespace-pre-wrap">
+                      {selectedCandidate.match_reasoning}
+                    </p>
                   </div>
-                )}
-              </div>
 
-              {/* Status Update Actions */}
-              <div className="border-t border-slate-800 pt-6">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Change Pipeline Status</h4>
-                <div className="flex flex-wrap gap-2.5">
-                  <button
-                    onClick={() => updateCandidateStatus(selectedCandidate.id, 'shortlisted')}
-                    className={`px-4 py-2 border rounded-xl text-xs font-semibold cursor-pointer transition-all ${
-                      selectedCandidate.status === 'shortlisted'
-                        ? 'bg-emerald-600 border-transparent text-white'
-                        : 'border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    Shortlist
-                  </button>
-                  <button
-                    onClick={() => updateCandidateStatus(selectedCandidate.id, 'interview_scheduled')}
-                    className={`px-4 py-2 border rounded-xl text-xs font-semibold cursor-pointer transition-all ${
-                      selectedCandidate.status === 'interview_scheduled'
-                        ? 'bg-blue-600 border-transparent text-white'
-                        : 'border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    Schedule Interview
-                  </button>
-                  <button
-                    onClick={() => updateCandidateStatus(selectedCandidate.id, 'rejected')}
-                    className={`px-4 py-2 border rounded-xl text-xs font-semibold cursor-pointer transition-all ${
-                      selectedCandidate.status === 'rejected'
-                        ? 'bg-red-600 border-transparent text-white'
-                        : 'border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    Reject
-                  </button>
+                  {/* Core Skills match */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-emerald-950/10 border border-emerald-900/20 p-4.5 rounded-2xl flex flex-col">
+                      <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2.5">Matched Skills</span>
+                      {selectedCandidate.matched_skills.length === 0 ? (
+                        <span className="text-xs text-slate-500 font-medium">None identified</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectedCandidate.matched_skills.map((skill, i) => (
+                            <span key={i} className="text-[10px] font-semibold bg-emerald-950/40 border border-emerald-900/40 text-emerald-400 px-2 py-0.5 rounded">
+                              {skill}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="bg-red-950/10 border border-red-900/20 p-4.5 rounded-2xl flex flex-col">
+                      <span className="text-xs font-bold text-red-400 uppercase tracking-wider mb-2.5">Missing Skills</span>
+                      {selectedCandidate.missing_skills.length === 0 ? (
+                        <span className="text-xs text-slate-500 font-medium">None identified</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectedCandidate.missing_skills.map((skill, i) => (
+                            <span key={i} className="text-[10px] font-semibold bg-red-950/40 border border-red-900/40 text-red-400 px-2 py-0.5 rounded">
+                              {skill}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Assign Interviewers Section */}
+                  <div className="border-t border-slate-800 pt-6">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Assign Interviewers</h4>
+                    {teamMembers.length === 0 ? (
+                      <p className="text-xs text-slate-500">No team members available.</p>
+                    ) : (
+                      <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                        {teamMembers.map((member) => {
+                          const isAssigned = selectedCandidate.assigned_interviewer_ids?.includes(member.id) || false;
+                          return (
+                            <label
+                              key={member.id}
+                              className="flex items-center space-x-3 text-xs text-slate-300 hover:text-white cursor-pointer select-none"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isAssigned}
+                                disabled={assigningInterviewerId === member.id}
+                                onChange={async () => {
+                                  setAssigningInterviewerId(member.id);
+                                  try {
+                                    let newIds = [...(selectedCandidate.assigned_interviewer_ids || [])];
+                                    if (isAssigned) {
+                                      newIds = newIds.filter((id) => id !== member.id);
+                                    } else {
+                                      newIds.push(member.id);
+                                    }
+
+                                    const res = await fetch(`/api/candidates/${selectedCandidate.id}`, {
+                                      method: 'PATCH',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ assigned_interviewer_ids: newIds }),
+                                    });
+                                    const updatedCandidate = await res.json();
+                                    if (!res.ok) throw new Error(updatedCandidate.error || 'Failed to update interviewers');
+
+                                    // Update state
+                                    setCandidates((prev) =>
+                                      prev.map((c) =>
+                                        c.id === selectedCandidate.id
+                                          ? { ...c, assigned_interviewer_ids: newIds }
+                                          : c
+                                      )
+                                    );
+                                    setSelectedCandidate((prev) =>
+                                      prev ? { ...prev, assigned_interviewer_ids: newIds } : null
+                                    );
+                                    toastSuccess(isAssigned ? 'Interviewer unassigned' : 'Interviewer assigned');
+                                  } catch (err: any) {
+                                    toastError(err.message || 'Failed to update assignment');
+                                  } finally {
+                                    setAssigningInterviewerId(null);
+                                  }
+                                }}
+                                className="rounded border-slate-800 bg-slate-950 text-violet-600 focus:ring-violet-500 focus:ring-offset-slate-950"
+                              />
+                              <div className="flex flex-col">
+                                <span className="font-semibold">{member.name || member.email}</span>
+                                <span className="text-[10px] text-slate-500 uppercase tracking-wider">
+                                  {member.role} {member.calendar_connected && '• Calendar Connected'}
+                                </span>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Status Update Actions */}
+                  <div className="border-t border-slate-800 pt-6">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Change Pipeline Status</h4>
+                    <div className="flex flex-wrap gap-2.5">
+                      <button
+                        onClick={() => updateCandidateStatus(selectedCandidate.id, 'shortlisted')}
+                        className={`px-4 py-2 border rounded-xl text-xs font-semibold cursor-pointer transition-all ${
+                          selectedCandidate.status === 'shortlisted'
+                            ? 'bg-emerald-600 border-transparent text-white'
+                            : 'border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                      >
+                        Shortlist
+                      </button>
+                      <button
+                        onClick={() => updateCandidateStatus(selectedCandidate.id, 'interview_scheduled')}
+                        className={`px-4 py-2 border rounded-xl text-xs font-semibold cursor-pointer transition-all ${
+                          selectedCandidate.status === 'interview_scheduled'
+                            ? 'bg-blue-600 border-transparent text-white'
+                            : 'border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                      >
+                        Schedule Interview
+                      </button>
+                      <button
+                        onClick={() => updateCandidateStatus(selectedCandidate.id, 'offer')}
+                        className={`px-4 py-2 border rounded-xl text-xs font-semibold cursor-pointer transition-all ${
+                          selectedCandidate.status === 'offer'
+                            ? 'bg-amber-600 border-transparent text-white'
+                            : 'border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                      >
+                        Extend Offer
+                      </button>
+                      <button
+                        onClick={() => updateCandidateStatus(selectedCandidate.id, 'rejected')}
+                        className={`px-4 py-2 border rounded-xl text-xs font-semibold cursor-pointer transition-all ${
+                          selectedCandidate.status === 'rejected'
+                            ? 'bg-red-600 border-transparent text-white'
+                            : 'border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-6">
+                  {/* Scorecards */}
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Overall Evaluations</h4>
+
+                    {scorecards.length > 0 ? (
+                      <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-xl flex items-center justify-between mb-4 shadow-sm">
+                        <div className="flex flex-col">
+                          <span className="text-2xl font-extrabold text-white">
+                            {averageRatingString}
+                            <span className="text-xs text-slate-500 font-medium"> / 5.0</span>
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mt-0.5">
+                            {scorecards.length} Reviews
+                          </span>
+                        </div>
+                        <div className="text-violet-400 text-sm tracking-widest">
+                          {"★".repeat(averageRatingVal)}
+                          {"☆".repeat(5 - averageRatingVal)}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 mb-4">No reviews submitted yet.</p>
+                    )}
+
+                    {/* Submit Review */}
+                    <form onSubmit={handlePostScorecard} className="bg-slate-900 border border-slate-805 p-4 rounded-xl space-y-3 shadow-inner">
+                      <span className="text-xs font-bold text-slate-350 uppercase tracking-wider block">Submit Review</span>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-400">Rating:</span>
+                        <div className="flex space-x-1">
+                          {[1, 2, 3, 4, 5].map((val) => (
+                            <button
+                              key={val}
+                              type="button"
+                              onClick={() => setNewRating(val)}
+                              className={`text-lg transition-transform hover:scale-110 cursor-pointer ${
+                                val <= newRating ? 'text-amber-400' : 'text-slate-650 hover:text-slate-400'
+                              }`}
+                            >
+                              ★
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <textarea
+                        value={newFeedback}
+                        onChange={(e) => setNewFeedback(e.target.value)}
+                        placeholder="Add detailed feedback on tech skills, culture fit, etc."
+                        className="w-full min-h-[60px] rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-violet-500"
+                      />
+                      <button
+                        type="submit"
+                        disabled={submittingScorecard}
+                        className="w-full py-2 bg-violet-600 hover:bg-violet-500 transition-all text-xs font-semibold text-white rounded-lg cursor-pointer disabled:opacity-50"
+                      >
+                        {submittingScorecard ? 'Submitting...' : 'Submit Evaluation'}
+                      </button>
+                    </form>
+
+                    {/* Review Feed */}
+                    {scorecards.length > 0 && (
+                      <div className="mt-4 space-y-2.5">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Review Feed</span>
+                        {scorecards.map((sc) => (
+                          <div key={sc.id} className="bg-slate-950/20 border border-slate-900 p-3 rounded-xl flex flex-col space-y-1.5 text-xs">
+                            <div className="flex justify-between items-center">
+                              <span className="font-bold text-slate-300 truncate max-w-[200px]">
+                                {sc.profiles?.name || sc.profiles?.email}
+                              </span>
+                              <span className="text-amber-450 font-bold">
+                                {"★".repeat(sc.overall_rating)}
+                              </span>
+                            </div>
+                            {sc.feedback && <p className="text-slate-400 leading-relaxed italic">"{sc.feedback}"</p>}
+                            <span className="text-[9px] text-slate-500">{new Date(sc.created_at).toLocaleDateString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Notes Feed */}
+                  <div className="border-t border-slate-850 pt-6">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Internal Comments</h4>
+
+                    {notes.length === 0 ? (
+                      <p className="text-xs text-slate-500 mb-4">No comments posted yet.</p>
+                    ) : (
+                      <div className="space-y-3 mb-4 max-h-48 overflow-y-auto pr-1">
+                        {notes.map((note) => (
+                          <div key={note.id} className="bg-slate-950/20 border border-slate-900 p-3 rounded-xl flex flex-col space-y-1 text-xs">
+                            <div className="flex justify-between items-center text-[10px] text-slate-500 font-medium">
+                              <span className="font-semibold text-slate-400 truncate max-w-[200px]">
+                                {note.profiles?.name || note.profiles?.email}
+                              </span>
+                              <span>{new Date(note.created_at).toLocaleDateString()}</span>
+                            </div>
+                            <p className="text-slate-300 leading-relaxed">{note.content}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Note post form */}
+                    <form onSubmit={handlePostNote} className="space-y-2.5">
+                      <textarea
+                        value={newNote}
+                        onChange={(e) => setNewNote(e.target.value)}
+                        placeholder="Add an internal comment..."
+                        className="w-full min-h-[50px] rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-violet-500"
+                      />
+                      <button
+                        type="submit"
+                        disabled={submittingNote}
+                        className="py-1.5 px-4 bg-slate-850 hover:bg-slate-750 transition-all text-xs font-semibold text-white rounded-lg cursor-pointer disabled:opacity-50"
+                      >
+                        {submittingNote ? 'Posting...' : 'Post Comment'}
+                      </button>
+                    </form>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Bottom Actions footer */}
