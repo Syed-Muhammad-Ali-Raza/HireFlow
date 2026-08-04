@@ -33,7 +33,7 @@ export async function GET(
 
     const { data: candidate, error: candidateError } = await supabaseAdmin
       .from('candidates')
-      .select('id, name, email, job_id')
+      .select('id, name, email, job_id, assigned_interviewer_ids')
       .eq('id', candidateId)
       .single();
 
@@ -57,11 +57,17 @@ export async function GET(
       .eq('id', job.company_id)
       .single();
 
-    const { data: interviewers } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('profiles')
       .select('id, name, email')
       .eq('company_id', job.company_id)
       .eq('calendar_connected', true);
+
+    if (candidate.assigned_interviewer_ids && candidate.assigned_interviewer_ids.length > 0) {
+      query = query.in('id', candidate.assigned_interviewer_ids);
+    }
+
+    const { data: interviewers } = await query;
 
     return NextResponse.json({
       candidate: {

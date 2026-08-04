@@ -17,6 +17,7 @@ interface Candidate {
   missing_skills: string[];
   status: 'new' | 'shortlisted' | 'rejected' | 'interview_scheduled';
   created_at: string;
+  assigned_interviewer_ids?: string[] | null;
 }
 
 interface JobPosting {
@@ -76,6 +77,10 @@ export default function JobDashboardPage() {
   const [editSkills, setEditSkills] = useState('');
   const [savingJob, setSavingJob] = useState(false);
   const [deletingJob, setDeletingJob] = useState(false);
+
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  const [currentUserRole, setCurrentUserRole] = useState<string>('recruiter');
+  const [assigningInterviewerId, setAssigningInterviewerId] = useState<string | null>(null);
 
   const handleCopyInviteLink = async (candidateId: string) => {
     setCopyingInvite(true);
@@ -157,11 +162,28 @@ export default function JobDashboardPage() {
           return;
         }
 
+        // Fetch user profile role
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', session.user.id)
+          .single();
+        if (profile) {
+          setCurrentUserRole(profile.role);
+        }
+
         // Fetch Job Details
         const jobRes = await fetch(`/api/jobs/${jobId}`);
         const jobData = await jobRes.json();
         if (!jobRes.ok) throw new Error(jobData.error || 'Job description not found');
         setJob(jobData);
+
+        // Fetch Team Members
+        const teamRes = await fetch('/api/team/members');
+        const teamData = await teamRes.json();
+        if (teamRes.ok) {
+          setTeamMembers(teamData);
+        }
 
         // Fetch Candidates
         await refreshCandidates();
@@ -697,6 +719,75 @@ export default function JobDashboardPage() {
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* Assign Interviewers Section */}
+              <div className="border-t border-slate-800 pt-6">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Assign Interviewers</h4>
+                {teamMembers.length === 0 ? (
+                  <p className="text-xs text-slate-500">No team members available.</p>
+                ) : (
+                  <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                    {teamMembers.map((member) => {
+                      const isAssigned = selectedCandidate.assigned_interviewer_ids?.includes(member.id) || false;
+                      return (
+                        <label
+                          key={member.id}
+                          className="flex items-center space-x-3 text-xs text-slate-300 hover:text-white cursor-pointer select-none"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isAssigned}
+                            disabled={assigningInterviewerId === member.id}
+                            onChange={async () => {
+                              setAssigningInterviewerId(member.id);
+                              try {
+                                let newIds = [...(selectedCandidate.assigned_interviewer_ids || [])];
+                                if (isAssigned) {
+                                  newIds = newIds.filter((id) => id !== member.id);
+                                } else {
+                                  newIds.push(member.id);
+                                }
+
+                                const res = await fetch(`/api/candidates/${selectedCandidate.id}`, {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ assigned_interviewer_ids: newIds }),
+                                });
+                                const updatedCandidate = await res.json();
+                                if (!res.ok) throw new Error(updatedCandidate.error || 'Failed to update interviewers');
+
+                                // Update state
+                                setCandidates((prev) =>
+                                  prev.map((c) =>
+                                    c.id === selectedCandidate.id
+                                      ? { ...c, assigned_interviewer_ids: newIds }
+                                      : c
+                                  )
+                                );
+                                setSelectedCandidate((prev) =>
+                                  prev ? { ...prev, assigned_interviewer_ids: newIds } : null
+                                );
+                                toastSuccess(isAssigned ? 'Interviewer unassigned' : 'Interviewer assigned');
+                              } catch (err: any) {
+                                toastError(err.message || 'Failed to update assignment');
+                              } finally {
+                                setAssigningInterviewerId(null);
+                              }
+                            }}
+                            className="rounded border-slate-800 bg-slate-950 text-violet-600 focus:ring-violet-500 focus:ring-offset-slate-950"
+                          />
+                          <div className="flex flex-col">
+                            <span className="font-semibold">{member.name || member.email}</span>
+                            <span className="text-[10px] text-slate-500 uppercase tracking-wider">
+                              {member.role} {member.calendar_connected && '• Calendar Connected'}
+                            </span>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Status Update Actions */}

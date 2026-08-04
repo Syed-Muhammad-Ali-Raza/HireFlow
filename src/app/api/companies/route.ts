@@ -29,10 +29,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: companyError?.message || 'Failed to create company' }, { status: 500 });
     }
 
-    // 3. Update current profile with the company_id
+    // 3. Update current profile with the company_id and set role as admin
     const { error: profileError } = await supabase
       .from('profiles')
-      .update({ company_id: company.id })
+      .update({ company_id: company.id, role: 'admin' })
       .eq('id', user.id);
 
     if (profileError) {

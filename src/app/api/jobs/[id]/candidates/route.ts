@@ -3,6 +3,7 @@ import { createClient } from '@/utils/supabase/server';
 import { extractTextFromPdf } from '@/lib/pdf';
 import { evaluateResume } from '@/lib/ai';
 import { extractContactFromResume } from '@/lib/resume-parse';
+import { assertRole } from '@/lib/auth-helpers';
 
 // GET: List all candidates for a specific job posting, sorted by score descending
 export async function GET(
@@ -45,13 +46,10 @@ export async function POST(
 ) {
   try {
     const { id: jobId } = await params;
-    const supabase = await createClient();
+    const { profile, errorResponse } = await assertRole(['admin', 'recruiter']);
+    if (errorResponse) return errorResponse;
 
-    // 1. Authenticate user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const supabase = await createClient();
 
     // 2. Fetch Job Description
     const { data: job, error: jobError } = await supabase

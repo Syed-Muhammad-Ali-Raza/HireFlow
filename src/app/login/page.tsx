@@ -14,20 +14,58 @@ export default function LoginPage() {
   const [name, setName] = useState('');
   const [companyName, setCompanyName] = useState('');
 
+  const [token, setToken] = useState<string | null>(null);
+  const [inviteDetails, setInviteDetails] = useState<{ company_name: string; role: string; email: string } | null>(null);
+
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  // If already logged in, redirect to home
+  // Extract invite token from URL
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const urlToken = searchParams.get('token');
+      if (urlToken) {
+        setToken(urlToken);
+        setIsSignUp(true); // Default to sign up for invited members
+      }
+    }
+  }, []);
+
+  // Fetch invitation details if token is present
+  useEffect(() => {
+    if (!token) return;
+    async function loadInviteDetails() {
+      try {
+        const res = await fetch(`/api/team/invites/accept?token=${encodeURIComponent(token!)}`);
+        const data = await res.json();
+        if (res.ok) {
+          setInviteDetails(data);
+          if (data.email) {
+            setEmail(data.email);
+          }
+        } else {
+          setError(data.error || 'Invitation is invalid or has expired.');
+        }
+      } catch (err) {
+        console.error('Error fetching invite details:', err);
+      }
+    }
+    loadInviteDetails();
+  }, [token]);
+
+  // If already logged in (and no token to process), redirect to home
   useEffect(() => {
     async function checkUser() {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
+      // Only auto-redirect if we don't have a token to process
+      if (session && !token) {
         router.push('/');
       }
     }
     checkUser();
-  }, [router, supabase]);
+  }, [router, supabase, token]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +76,7 @@ export default function LoginPage() {
     try {
       if (isSignUp) {
         if (!name.trim()) throw new Error('Full Name is required');
-        if (!companyName.trim()) throw new Error('Company Name is required for recruiters');
+        if (!token && !companyName.trim()) throw new Error('Company Name is required for recruiters');
 
         // 1. Sign up the user in Supabase Auth
         const { data: authData, error: signUpError } = await supabase.auth.signUp({
@@ -53,32 +91,57 @@ export default function LoginPage() {
 
         if (signUpError) throw signUpError;
 
-        // If email confirmation is required or not, let's log them in or ask to check email
         if (authData.session) {
-          // Logged in immediately, now create their company
-          const res = await fetch('/api/companies', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: companyName.trim() }),
-          });
-          const compData = await res.json();
-          if (!res.ok) throw new Error(compData.error || 'Failed to initialize company');
+          if (token) {
+            // Join existing company
+            const acceptRes = await fetch('/api/team/invites/accept', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token }),
+            });
+            const acceptData = await acceptRes.json();
+            if (!acceptRes.ok) throw new Error(acceptData.error || 'Failed to accept invitation');
+          } else {
+            // Logged in immediately, now create their company
+            const res = await fetch('/api/companies', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: companyName.trim() }),
+            });
+            const compData = await res.json();
+            if (!res.ok) throw new Error(compData.error || 'Failed to initialize company');
+          }
 
           router.push('/');
           router.refresh();
         } else {
-          // Needs verification or success message
-          setMessage('Registration successful! Please check your email for a confirmation link or sign in.');
+          // Needs verification
+          if (token) {
+            setMessage('Registration successful! Please confirm your email to complete joining the company, then sign in.');
+          } else {
+            setMessage('Registration successful! Please check your email for a confirmation link or sign in.');
+          }
           setIsSignUp(false);
         }
       } else {
         // Sign In
-        const { error: signInError } = await supabase.auth.signInWithPassword({
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
 
         if (signInError) throw signInError;
+
+        if (token) {
+          // Join existing company on sign in
+          const acceptRes = await fetch('/api/team/invites/accept', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token }),
+          });
+          const acceptData = await acceptRes.json();
+          if (!acceptRes.ok) throw new Error(acceptData.error || 'Failed to accept invitation');
+        }
 
         router.push('/');
         router.refresh();
@@ -106,7 +169,7 @@ export default function LoginPage() {
           </span>
         </div>
         <h2 className="mt-6 text-center text-3xl font-display font-bold tracking-tight text-white">
-          {isSignUp ? 'Create your hiring portal' : 'Welcome back'}
+          {isSignUp ? (token ? 'Join your hiring team' : 'Create your hiring portal') : 'Welcome back'}
         </h2>
         <p className="mt-2 text-center text-sm text-slate-400">
           {isSignUp ? 'Already have an account? ' : 'New to HireFlow? '}
@@ -125,6 +188,15 @@ export default function LoginPage() {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         <div className="bg-slate-900/60 backdrop-blur-xl py-8 px-4 border border-slate-800/80 shadow-2xl rounded-2xl sm:px-10">
+          {inviteDetails && (
+            <div className="rounded-xl bg-violet-950/40 border border-violet-900/40 p-4 mb-5">
+              <span className="text-[10px] font-bold text-violet-400 uppercase tracking-wider block mb-1">Invitation Found</span>
+              <p className="text-sm text-slate-200 leading-relaxed">
+                You've been invited to join <strong className="text-white">{inviteDetails.company_name}</strong> as an <strong className="text-violet-400 capitalize">{inviteDetails.role}</strong>.
+              </p>
+            </div>
+          )}
+
           <form className="space-y-5" onSubmit={handleSubmit}>
             {isSignUp && (
               <>
@@ -146,23 +218,25 @@ export default function LoginPage() {
                   </div>
                 </div>
 
-                <div>
-                  <label htmlFor="company" className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                    Company Name
-                  </label>
-                  <div className="mt-1">
-                    <input
-                      id="company"
-                      name="company"
-                      type="text"
-                      required
-                      value={companyName}
-                      onChange={(e) => setCompanyName(e.target.value)}
-                      placeholder="Acme Inc."
-                      className="block w-full rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all"
-                    />
+                {!token && (
+                  <div>
+                    <label htmlFor="company" className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                      Company Name
+                    </label>
+                    <div className="mt-1">
+                      <input
+                        id="company"
+                        name="company"
+                        type="text"
+                        required
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                        placeholder="Acme Inc."
+                        className="block w-full rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all"
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
               </>
             )}
 
@@ -177,10 +251,11 @@ export default function LoginPage() {
                   type="email"
                   autoComplete="email"
                   required
+                  disabled={!!inviteDetails}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@company.com"
-                  className="block w-full rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all"
+                  className="block w-full rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                 />
               </div>
             </div>
@@ -228,7 +303,7 @@ export default function LoginPage() {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
                 ) : null}
-                {isSignUp ? 'Get Started' : 'Sign In'}
+                {isSignUp ? (token ? 'Accept Invitation' : 'Get Started') : 'Sign In'}
               </button>
             </div>
           </form>
