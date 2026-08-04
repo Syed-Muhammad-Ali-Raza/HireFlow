@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { buildBookingUrl, createBookingToken } from '@/lib/booking';
+import { assertRole } from '@/lib/auth-helpers';
 
 /**
  * POST /api/candidates/[id]/booking-link
@@ -12,15 +13,10 @@ export async function POST(
 ) {
   try {
     const { id: candidateId } = await params;
-    const supabase = await createClient();
+    const { profile, errorResponse } = await assertRole(['admin', 'recruiter']);
+    if (errorResponse) return errorResponse;
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const supabase = await createClient();
 
     // RLS ensures the candidate belongs to the user's company
     const { data: candidate, error: candError } = await supabase

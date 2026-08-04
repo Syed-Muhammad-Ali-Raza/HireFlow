@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { assertRole } from '@/lib/auth-helpers';
 
 export async function GET(
   request: Request,
@@ -40,15 +41,10 @@ export async function PATCH(
 ) {
   try {
     const { id: jobId } = await params;
-    const supabase = await createClient();
+    const { profile, errorResponse } = await assertRole(['admin', 'recruiter']);
+    if (errorResponse) return errorResponse;
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const supabase = await createClient();
 
     const body = await request.json();
     const updates: Record<string, unknown> = {};
@@ -101,15 +97,10 @@ export async function DELETE(
 ) {
   try {
     const { id: jobId } = await params;
-    const supabase = await createClient();
+    const { profile, errorResponse } = await assertRole(['admin', 'recruiter']);
+    if (errorResponse) return errorResponse;
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const supabase = await createClient();
 
     const { error: deleteError } = await supabase.from('job_postings').delete().eq('id', jobId);
 
