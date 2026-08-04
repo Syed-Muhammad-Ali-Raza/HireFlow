@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { assertRole } from '@/lib/auth-helpers';
 
 // GET: List all job postings for the current user's company
 export async function GET() {
@@ -42,28 +43,15 @@ export async function GET() {
 // POST: Create a new job posting
 export async function POST(request: Request) {
   try {
+    const { profile, errorResponse } = await assertRole(['admin', 'recruiter']);
+    if (errorResponse) return errorResponse;
+
     const supabase = await createClient();
     const body = await request.json();
     const { title, description, required_skills } = body;
 
     if (!title || !description) {
       return NextResponse.json({ error: 'Title and Description are required' }, { status: 400 });
-    }
-
-    // 1. Get current logged-in user details
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('company_id')
-      .eq('id', user.id)
-      .single();
-
-    if (profileError || !profile || !profile.company_id) {
-      return NextResponse.json({ error: 'Company not configured for profile. Please set up a company first.' }, { status: 400 });
     }
 
     // 2. Insert the job posting
@@ -74,7 +62,7 @@ export async function POST(request: Request) {
         title,
         description,
         required_skills: required_skills || [],
-        created_by: user.id,
+        created_by: profile.id,
       })
       .select()
       .single();

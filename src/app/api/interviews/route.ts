@@ -4,6 +4,7 @@ import { createClient } from '@/utils/supabase/server';
 import { decryptToken, refreshGoogleAccessToken, createGoogleEvent } from '@/lib/calendar';
 import { assertBookingAccess } from '@/lib/booking';
 import { checkRateLimit, clientIp } from '@/lib/rate-limit';
+import { createAuditLog } from '@/lib/audit';
 
 // GET: Fetch all interviews for current user's company
 export async function GET() {
@@ -89,10 +90,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Candidate not found' }, { status: 404 });
     }
 
-    // 3. Fetch Job title
+    // 3. Fetch Job title & company_id
     const { data: job } = await supabaseAdmin
       .from('job_postings')
-      .select('title')
+      .select('title, company_id')
       .eq('id', candidate.job_id)
       .single();
 
@@ -166,6 +167,21 @@ export async function POST(request: Request) {
       .from('candidates')
       .update({ status: 'interview_scheduled' })
       .eq('id', candidate_id);
+
+    // Write audit log entry for the interview booking
+    if (job?.company_id) {
+      await createAuditLog(
+        job.company_id,
+        null, // Public candidate booking, no logged-in recruiter/admin profile ID
+        'candidate_status_changed',
+        {
+          candidate_id,
+          candidate_name: candidate.name,
+          status: 'interview_scheduled',
+          trigger: 'public_booking',
+        }
+      );
+    }
 
     return NextResponse.json(interview, { status: 201 });
   } catch (error: any) {
