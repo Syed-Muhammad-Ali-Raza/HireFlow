@@ -1,5 +1,6 @@
 -- HireFlow Database Migration — Phase 3 (Notes, Scorecards & Offer Status)
--- Run this in the Supabase SQL Editor
+-- Run this in the Supabase SQL Editor AFTER Phase 2 multiuser SQL
+-- Guide: docs/SUPABASE_SETUP.md
 
 -- 1. Update Candidate Status Check Constraint to include 'offer'
 alter table public.candidates drop constraint if exists candidates_status_check;

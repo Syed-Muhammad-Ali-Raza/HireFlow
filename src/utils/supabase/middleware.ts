@@ -52,8 +52,15 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Already signed in — skip login page
+  // Already signed in — skip login unless they are accepting an invite token
   if (user && isAuthPage(pathname)) {
+    const inviteToken = request.nextUrl.searchParams.get('token');
+    if (inviteToken) {
+      const inviteUrl = request.nextUrl.clone();
+      inviteUrl.pathname = `/invite/${inviteToken}`;
+      inviteUrl.search = '';
+      return NextResponse.redirect(inviteUrl);
+    }
     const homeUrl = request.nextUrl.clone();
     homeUrl.pathname = '/';
     homeUrl.search = '';

@@ -1,5 +1,7 @@
--- HireFlow Database Schema
--- Run this in the Supabase SQL Editor
+-- HireFlow Database Schema (Phase 1 core)
+-- Run this in the Supabase SQL Editor.
+-- Full walkthrough: docs/SUPABASE_SETUP.md
+-- Fresh install: prefer setup_all.sql instead of running files one-by-one.
 
 -- 1. Enable UUID generation extension
 create extension if not exists "uuid-ossp";

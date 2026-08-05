@@ -3,6 +3,8 @@
 -- =========================================================================
 -- Run this entire script in the Supabase SQL Editor (Dashboard -> SQL Editor)
 -- to set up all tables, indexes, triggers, RLS policies, and storage bucket.
+--
+-- Step-by-step human guide: docs/SUPABASE_SETUP.md
 
 -- =========================================================================
 -- PHASE 1: CORE SCHEMA (schema.sql)
@@ -564,3 +566,42 @@ create policy "Public read resumes"
 on storage.objects for select
 to public
 using (bucket_id = 'resumes');
+
+-- =========================================================================
+-- PHASE 2 HARDENING: lock role / company_id on profiles
+-- =========================================================================
+
+create or replace function public.protect_profile_privileged_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if current_user in ('postgres', 'supabase_admin', 'service_role') then
+    return new;
+  end if;
+
+  if coalesce(auth.role(), '') = 'service_role' then
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    if new.role is distinct from old.role then
+      raise exception 'Changing role is not allowed from the client. Use Team settings.';
+    end if;
+    if new.company_id is distinct from old.company_id then
+      raise exception 'Changing company is not allowed from the client. Use an invite link.';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_profile_privileged_fields on public.profiles;
+
+create trigger protect_profile_privileged_fields
+  before update on public.profiles
+  for each row
+  execute procedure public.protect_profile_privileged_fields();

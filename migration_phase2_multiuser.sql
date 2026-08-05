@@ -1,5 +1,7 @@
 -- HireFlow Database Migration — Phase 2 Multiuser (Invites, Roles & Audits)
--- Run this in the Supabase SQL Editor
+-- Run this in the Supabase SQL Editor AFTER migration_phase2.sql
+-- Creates: company_invites, audit_logs, assigned_interviewer_ids + role-aware RLS
+-- Guide: docs/SUPABASE_SETUP.md
 
 -- 1. Add assigned_interviewer_ids to Candidates Table
 alter table public.candidates 

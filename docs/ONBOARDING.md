@@ -89,14 +89,14 @@ Create Storage bucket `resumes` if testing uploads.
 
 **Risks:** no invite audit trail; roles don’t restrict UI; anyone who signs up could create their own company.
 
-### B2. Target flow (Phase 2 — build this)
+### B2. Invite flow (Phase 2 — shipped)
 
 ```
-Admin opens Team settings
+Admin opens Team settings (/settings/team)
   → enters email + role
   → system creates invite token (expires 7 days)
-  → email link: /invite/[token]
-  → user signs up / logs in
+  → share link: /invite/[token]
+  → user signs up / logs in with that email
   → invite consumed; profile.company_id + role set
   → redirect to dashboard
 ```
@@ -211,10 +211,10 @@ Run through this after setup (`.env.local` + SQL + optional Storage/AI/Google):
 ## Quick answers
 
 **“Can I add my cofounder as a second recruiter today?”**  
-Yes, only via manual `profiles.company_id` update in Supabase (Part B1). Build invites ASAP.
+Yes — after running Phase 2 SQL, use **Team → Invite** (you must be `admin`). Manual Table Editor edits still work as a fallback.
 
 **“Can I add a developer this week?”**  
 Yes — Part A. Give them staging credentials only.
 
 **“When can we add interviewers properly?”**  
-After Phase 2: invites + role enforcement + interviewer assignment on booking.
+Now — invite them as `interviewer`, have them connect Google Calendar, then assign them on a candidate.
