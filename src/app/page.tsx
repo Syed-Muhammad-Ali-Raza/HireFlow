@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase/client';
+import ChatPanel from '@/components/ChatPanel';
 
 interface JobPosting {
   id: string;
@@ -412,6 +413,9 @@ export default function HomePage() {
           )}
         </div>
       </main>
+      
+      {/* AI Recruiter Copilot */}
+      <ChatPanel />
     </div>
   );
 }
