@@ -39,6 +39,15 @@ export default function TeamSettingsPage() {
   // Lists
   const [members, setMembers] = useState<MemberProfile[]>([]);
   const [invites, setInvites] = useState<PendingInvite[]>([]);
+  const [auditLogs, setAuditLogs] = useState<
+    {
+      id: string;
+      action: string;
+      details: Record<string, unknown>;
+      created_at: string;
+      profiles?: { name: string | null; email: string } | null;
+    }[]
+  >([]);
 
   // Invite Form State
   const [inviteEmail, setInviteEmail] = useState('');
@@ -75,6 +84,17 @@ export default function TeamSettingsPage() {
     }
   };
 
+  const fetchAuditLogs = async () => {
+    try {
+      const res = await fetch('/api/team/audit-logs');
+      const data = await res.json();
+      if (!res.ok) return;
+      setAuditLogs(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Error fetching audit logs:', err);
+    }
+  };
+
   useEffect(() => {
     async function loadInitialData() {
       setLoading(true);
@@ -98,6 +118,7 @@ export default function TeamSettingsPage() {
           await Promise.all([
             fetchMembers(),
             profile.role === 'admin' ? fetchInvites() : Promise.resolve(),
+            profile.role === 'admin' ? fetchAuditLogs() : Promise.resolve(),
           ]);
         }
       } catch (err: any) {
@@ -196,6 +217,19 @@ export default function TeamSettingsPage() {
       toastError(err.message || 'Failed to remove member.');
     } finally {
       setActionUserId(null);
+    }
+  };
+
+  const handleResendInvite = async (inviteId: string) => {
+    try {
+      const res = await fetch(`/api/team/invites/${inviteId}/resend`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to resend invite');
+      setGeneratedInviteUrl(data.inviteUrl);
+      toastSuccess('Invite refreshed. Copy the new link.');
+      await fetchInvites();
+    } catch (err: unknown) {
+      toastError(err instanceof Error ? err.message : 'Failed to resend invite.');
     }
   };
 
@@ -392,11 +426,18 @@ export default function TeamSettingsPage() {
                               <button
                                 onClick={() => {
                                   const origin = window.location.origin;
-                                  setGeneratedInviteUrl(`${origin}/login?token=${invite.token}`);
+                                  setGeneratedInviteUrl(`${origin}/invite/${invite.token}`);
                                 }}
                                 className="px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-semibold text-slate-400 hover:bg-slate-900 hover:text-white transition-all cursor-pointer"
                               >
                                 Show Link
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleResendInvite(invite.id)}
+                                className="px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-semibold text-slate-400 hover:bg-slate-900 hover:text-white transition-all cursor-pointer"
+                              >
+                                Resend
                               </button>
                               <button
                                 onClick={() => handleRevokeInvite(invite.id, invite.email)}
@@ -472,6 +513,30 @@ export default function TeamSettingsPage() {
             )}
           </div>
         </div>
+
+        {isAdmin && auditLogs.length > 0 && (
+          <section className="mt-10">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Recent activity</h2>
+            <div className="bg-slate-900/30 border border-slate-900 rounded-2xl divide-y divide-slate-900">
+              {auditLogs.slice(0, 20).map((log) => (
+                <div key={log.id} className="px-5 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-200">{log.action.replace(/_/g, ' ')}</p>
+                    <p className="text-[11px] text-slate-500">
+                      {log.profiles?.email || 'System'}
+                      {log.details && Object.keys(log.details).length > 0
+                        ? ` · ${JSON.stringify(log.details).slice(0, 120)}`
+                        : ''}
+                    </p>
+                  </div>
+                  <span className="text-[11px] text-slate-600 shrink-0">
+                    {new Date(log.created_at).toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </main>
 
       {/* INVITE SUCCESS MODAL */}

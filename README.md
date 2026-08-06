@@ -16,12 +16,12 @@ AI-powered recruiting platform: post jobs, upload resumes, get AI match scores, 
 | Candidate pipeline statuses | Done |
 | Google Calendar connect + Meet booking | Done |
 | Public candidate booking page | Done |
-| Roles (admin / interviewer / recruiter) | Schema only — not enforced |
-| Team invites / join existing company | Not built |
+| Roles (admin / interviewer / recruiter) | Enforced in API + RLS |
+| Team invites / join existing company | Done — `/settings/team` + `/invite/[token]` |
 | Outlook calendar | Schema only |
-| Interviews dashboard UI | API only |
-| Product chatbot | Not built |
-| Real docs (this file) | Replaces default create-next-app README |
+| Interviews dashboard UI | Done — `/interviews` |
+| Product chatbot | Not built (Phase 4) |
+| Docs | README + docs/SUPABASE_SETUP.md |
 
 ---
 
@@ -65,16 +65,17 @@ GOOGLE_CLIENT_SECRET=
 CALENDAR_ENCRYPTION_KEY=  # 32-byte secret for encrypting refresh tokens
 ```
 
-### 3. Database
+### 3. Database (required)
 
-In Supabase → SQL Editor, run in order:
+**Full guide:** [docs/SUPABASE_SETUP.md](./docs/SUPABASE_SETUP.md)
 
-1. `schema.sql` — companies, profiles, jobs, candidates, RLS, signup trigger  
-2. `migration_phase2.sql` — calendar columns + interviews table  
+**Fastest path:** Supabase → SQL Editor → paste and run [`setup_all.sql`](./setup_all.sql).
+
+Or run incrementally: `schema.sql` → `migration_phase2.sql` → `migration_phase2_multiuser.sql` → `migration_phase2_hardening.sql` → `migration_phase3.sql` → `storage_resumes.sql`.
 
 ### 4. Storage (optional but recommended)
 
-In Supabase → SQL Editor, also run `storage_resumes.sql` (or create a public bucket named `resumes` in the Storage UI). Without it, uploads still work but use a mock file URL.
+Included in `setup_all.sql`. Or run `storage_resumes.sql` / create a public bucket named `resumes`. Without it, uploads still work but use a mock file URL.
 
 ### 5. Run
 
@@ -130,6 +131,7 @@ migration_phase2.sql
 | [README.md](./README.md) | Setup & overview (this file) |
 | [docs/IMPLEMENTATION_PLAN.md](./docs/IMPLEMENTATION_PLAN.md) | Phased roadmap, scale, chatbot, team onboarding |
 | [docs/ONBOARDING.md](./docs/ONBOARDING.md) | Guide for adding a new teammate / collaborator |
+| [docs/SUPABASE_SETUP.md](./docs/SUPABASE_SETUP.md) | Create all tables in Supabase (SQL + verification) |
 | `schema.sql` / `migration_phase2.sql` | Database source of truth |
 
 ---

@@ -107,7 +107,7 @@ export async function POST(request: Request) {
 
     // 5. Construct invite URL
     const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const inviteUrl = `${origin.replace(/\/$/, '')}/login?token=${token}`;
+    const inviteUrl = `${origin.replace(/\/$/, '')}/invite/${token}`;
 
     // 6. Log audit event
     await createAuditLog(

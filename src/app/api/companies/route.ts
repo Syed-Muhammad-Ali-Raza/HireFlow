@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/utils/supabase/server';
 
 export async function POST(request: Request) {
@@ -11,13 +12,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Company name is required' }, { status: 400 });
     }
 
-    // 1. Authenticate user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // 2. Insert new company
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('company_id')
+      .eq('id', user.id)
+      .single();
+
+    if (existingProfile?.company_id) {
+      return NextResponse.json({ error: 'You already belong to a company.' }, { status: 400 });
+    }
+
     const { data: company, error: companyError } = await supabase
       .from('companies')
       .insert({ name: name.trim() })
@@ -26,35 +38,45 @@ export async function POST(request: Request) {
 
     if (companyError || !company) {
       console.error('Company creation error:', companyError);
-      return NextResponse.json({ error: companyError?.message || 'Failed to create company' }, { status: 500 });
+      return NextResponse.json(
+        { error: companyError?.message || 'Failed to create company' },
+        { status: 500 }
+      );
     }
 
-    // 3. Update current profile with the company_id and set role as admin
-    const { error: profileError } = await supabase
+    // Service role bypasses the privileged-field trigger (role + company_id)
+    const supabaseAdmin = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    const { error: profileError } = await supabaseAdmin
       .from('profiles')
       .update({ company_id: company.id, role: 'admin' })
       .eq('id', user.id);
 
     if (profileError) {
       console.error('Profile update error:', profileError);
-      // Attempt to clean up company if profile linking failed
-      await supabase.from('companies').delete().eq('id', company.id);
+      await supabaseAdmin.from('companies').delete().eq('id', company.id);
       return NextResponse.json({ error: profileError.message }, { status: 500 });
     }
 
     return NextResponse.json(company, { status: 201 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Companies route error:', error);
-    return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Internal Server Error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
-// GET: Fetch current user's company info
 export async function GET() {
   try {
     const supabase = await createClient();
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -80,7 +102,8 @@ export async function GET() {
     }
 
     return NextResponse.json({ company });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Internal Server Error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase/client';
+import ChatPanel from '@/components/ChatPanel';
 
 interface JobPosting {
   id: string;
@@ -295,6 +296,11 @@ export default function HomePage() {
             <div className="flex items-center space-x-4">
               <span className="text-sm text-slate-400">
                 Logged in as <strong className="text-slate-200">{profile?.name || session.user.email}</strong>
+                {profile?.role && (
+                  <span className="ml-2 text-[10px] uppercase tracking-wider text-violet-400 font-bold">
+                    {profile.role}
+                  </span>
+                )}
               </span>
               <Link
                 href="/interviews"
@@ -333,17 +339,19 @@ export default function HomePage() {
             <h1 className="text-3xl font-display font-extrabold text-white tracking-tight">Active Jobs</h1>
             <p className="text-sm text-slate-400 mt-1">Manage jobs and screen incoming candidate resume PDFs.</p>
           </div>
-          <div className="mt-4 md:mt-0">
-            <Link
-              href="/jobs/new"
-              className="inline-flex items-center px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 transition-all cursor-pointer shadow-lg shadow-violet-600/20 hover:scale-[1.01]"
-            >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-              </svg>
-              Create Job Posting
-            </Link>
-          </div>
+          {profile?.role !== 'interviewer' && (
+            <div className="mt-4 md:mt-0">
+              <Link
+                href="/jobs/new"
+                className="inline-flex items-center px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 transition-all cursor-pointer shadow-lg shadow-violet-600/20 hover:scale-[1.01]"
+              >
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                </svg>
+                Create Job Posting
+              </Link>
+            </div>
+          )}
         </div>
 
         {/* Job Listings Grid */}
@@ -405,6 +413,9 @@ export default function HomePage() {
           )}
         </div>
       </main>
+      
+      {/* AI Recruiter Copilot */}
+      <ChatPanel />
     </div>
   );
 }

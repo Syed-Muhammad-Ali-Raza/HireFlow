@@ -1,5 +1,6 @@
 -- HireFlow Database Migration — Phase 2 (Calendar & Interviews)
--- Run this in the Supabase SQL Editor
+-- Run this in the Supabase SQL Editor AFTER schema.sql
+-- Guide: docs/SUPABASE_SETUP.md
 
 -- 1. Add Calendar Columns to Profiles table
 alter table public.profiles 

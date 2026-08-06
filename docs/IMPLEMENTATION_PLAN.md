@@ -50,20 +50,22 @@ Goal: reliable local + staging demo for one company.
 
 ---
 
-### Phase 2 — Multi-user & roles (2–3 weeks) — NEXT
+### Phase 2 — Multi-user & roles ✅ COMPLETED
 
 Goal: safely add admins, recruiters, interviewers to the same company.
 
-| # | Work item | Details |
-|---|-----------|---------|
-| 2.1 | Invite system | Admin invites by email → magic link / token → join `company_id` + role |
-| 2.2 | Enforce roles in API | Middleware/helpers: admin (settings, invites, billing later), recruiter (jobs/candidates), interviewer (calendar + assigned interviews) |
-| 2.3 | Team settings UI | List members, change role, revoke, resend invite |
-| 2.4 | Interviewer assignment | Pick specific interviewers (not “anyone with calendar connected”) |
-| 2.5 | RLS updates | Policies that respect role where needed; prevent privilege escalation |
-| 2.6 | Audit log (light) | Who changed candidate status / score |
+| # | Work item | Status |
+|---|-----------|--------|
+| 2.1 | Invite system | Done — `/settings/team`, `/invite/[token]` |
+| 2.2 | Enforce roles in API | Done — `assertRole` + RLS |
+| 2.3 | Team settings UI | Done — members, invite, revoke, resend |
+| 2.4 | Interviewer assignment | Done — candidate drawer + booking filter |
+| 2.5 | RLS + privilege lock | Done — `migration_phase2_hardening.sql` |
+| 2.6 | Audit log | Done — `audit_logs` + Team activity list |
 
 **Exit criteria:** Second person joins via invite; roles restrict actions; booking uses assigned interviewers only.
+
+**SQL to run:** see [SUPABASE_SETUP.md](./SUPABASE_SETUP.md) (`setup_all.sql` or incremental Phase 2 files).
 
 See also: [ONBOARDING.md](./ONBOARDING.md).
 
