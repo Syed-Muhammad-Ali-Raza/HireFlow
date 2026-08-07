@@ -5,6 +5,7 @@ import { decryptToken, refreshGoogleAccessToken, createGoogleEvent } from '@/lib
 import { assertBookingAccess } from '@/lib/booking';
 import { checkRateLimit, clientIp } from '@/lib/rate-limit';
 import { createAuditLog } from '@/lib/audit';
+import { sendInterviewConfirmationEmail } from '@/lib/email';
 
 // GET: Fetch all interviews for current user's company
 export async function GET() {
@@ -90,14 +91,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Candidate not found' }, { status: 404 });
     }
 
-    // 3. Fetch Job title & company_id
+    // 3. Fetch Job title & company_id & company name
     const { data: job } = await supabaseAdmin
       .from('job_postings')
-      .select('title, company_id')
+      .select('title, company_id, companies!inner(name)')
       .eq('id', candidate.job_id)
       .single();
 
     const jobTitle = job?.title || 'Role';
+    const companyName = (job as any)?.companies?.name || 'Your Company';
 
     // 4. Fetch Interviewers profile details (emails, refresh tokens)
     const { data: profiles, error: profilesError } = await supabaseAdmin
@@ -167,6 +169,43 @@ export async function POST(request: Request) {
       .from('candidates')
       .update({ status: 'interview_scheduled' })
       .eq('id', candidate_id);
+
+    // Send confirmation emails
+    const interviewerNames = profiles.map(p => p.name || p.email);
+    const meetingLink = eventData.meetingLink || '';
+
+    // Candidate Confirmation Email
+    if (candidate.email) {
+      sendInterviewConfirmationEmail(
+        candidate.email,
+        candidate.name,
+        jobTitle,
+        companyName,
+        scheduled_time,
+        meetingLink,
+        interviewerNames
+      ).catch(err => {
+        console.error('Failed to send interview confirmation email to candidate:', err);
+      });
+    }
+
+    // Interviewer(s) Confirmation Emails
+    for (const interviewer of profiles) {
+      if (interviewer.email) {
+        sendInterviewConfirmationEmail(
+          interviewer.email,
+          interviewer.name || interviewer.email,
+          jobTitle,
+          companyName,
+          scheduled_time,
+          meetingLink,
+          interviewerNames,
+          candidate.name
+        ).catch(err => {
+          console.error(`Failed to send interview confirmation email to interviewer ${interviewer.email}:`, err);
+        });
+      }
+    }
 
     // Write audit log entry for the interview booking
     if (job?.company_id) {
