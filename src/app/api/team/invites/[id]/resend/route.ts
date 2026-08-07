@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { assertRole } from '@/lib/auth-helpers';
 import { createAuditLog } from '@/lib/audit';
+import { sendInviteEmail } from '@/lib/email';
 import crypto from 'crypto';
 
 /**
@@ -49,8 +50,27 @@ export async function POST(
       );
     }
 
+    // Fetch company name
+    const { data: companyData } = await supabase
+      .from('companies')
+      .select('name')
+      .eq('id', adminProfile.company_id)
+      .single();
+    const companyName = companyData?.name || 'Your Company';
+
     const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const inviteUrl = `${origin.replace(/\/$/, '')}/invite/${token}`;
+
+    // Resend invite email asynchronously
+    sendInviteEmail(
+      invite.email,
+      inviteUrl,
+      adminProfile.name || adminProfile.email,
+      companyName,
+      invite.role
+    ).catch(emailErr => {
+      console.error('Failed to resend invite email:', emailErr);
+    });
 
     await createAuditLog(adminProfile.company_id!, adminProfile.id, 'invite_resent', {
       invite_id: invite.id,

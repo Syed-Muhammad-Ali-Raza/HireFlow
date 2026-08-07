@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { assertRole } from '@/lib/auth-helpers';
 import { createAuditLog } from '@/lib/audit';
+import { createBookingToken, buildBookingUrl } from '@/lib/booking';
+import { sendShortlistEmail } from '@/lib/email';
 
 export async function PATCH(
   request: Request,
@@ -19,7 +21,7 @@ export async function PATCH(
     // 2. Build update object
     const updateData: any = {};
     if (status !== undefined) {
-      const validStatuses = ['new', 'shortlisted', 'interview_scheduled', 'rejected'];
+      const validStatuses = ['new', 'shortlisted', 'interview_scheduled', 'rejected', 'offer'];
       if (!validStatuses.includes(status)) {
         return NextResponse.json({ error: 'Invalid candidate status' }, { status: 400 });
       }
@@ -54,7 +56,7 @@ export async function PATCH(
       .from('candidates')
       .update(updateData)
       .eq('id', candidateId)
-      .select('*, job_postings!inner(company_id)')
+      .select('*, job_postings!inner(title, company_id, companies!inner(name))')
       .single();
 
     if (updateError || !candidate) {
@@ -62,9 +64,33 @@ export async function PATCH(
       return NextResponse.json({ error: updateError?.message || 'Candidate not found' }, { status: 500 });
     }
 
-    const companyId = (candidate as any).job_postings?.company_id;
+    const cand = candidate as any;
+    const companyId = cand.job_postings?.company_id;
 
-    // 4. Create Audit Logs
+    // 4. Send shortlist email if status was changed to 'shortlisted'
+    if (status === 'shortlisted' && cand.email) {
+      try {
+        const token = createBookingToken(candidateId);
+        const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        const bookingUrl = buildBookingUrl(origin, candidateId, token);
+        const jobTitle = cand.job_postings?.title || 'Position';
+        const companyName = cand.job_postings?.companies?.name || 'Your Company';
+
+        sendShortlistEmail(
+          cand.email,
+          cand.name,
+          jobTitle,
+          companyName,
+          bookingUrl
+        ).catch(emailErr => {
+          console.error('Failed to send shortlist email:', emailErr);
+        });
+      } catch (err) {
+        console.error('Failed to generate booking token/link for shortlist email:', err);
+      }
+    }
+
+    // 5. Create Audit Logs
     if (status !== undefined) {
       await createAuditLog(
         companyId,
