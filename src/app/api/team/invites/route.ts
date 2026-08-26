@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { assertRole } from '@/lib/auth-helpers';
 import { createAuditLog } from '@/lib/audit';
+import { sendInviteEmail } from '@/lib/email';
 import crypto from 'crypto';
 
 /**
@@ -105,9 +106,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: inviteError?.message || 'Failed to generate invitation.' }, { status: 500 });
     }
 
+    // Fetch company name
+    const { data: companyData } = await supabase
+      .from('companies')
+      .select('name')
+      .eq('id', adminProfile.company_id)
+      .single();
+    const companyName = companyData?.name || 'Your Company';
+
     // 5. Construct invite URL
     const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const inviteUrl = `${origin.replace(/\/$/, '')}/invite/${token}`;
+
+    // Send email invitation asynchronously
+    sendInviteEmail(
+      email.trim().toLowerCase(),
+      inviteUrl,
+      adminProfile.name || adminProfile.email,
+      companyName,
+      role
+    ).catch(emailErr => {
+      console.error('Failed to send invite email:', emailErr);
+    });
 
     // 6. Log audit event
     await createAuditLog(

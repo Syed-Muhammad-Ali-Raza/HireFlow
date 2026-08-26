@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
 import { createClient } from '@/utils/supabase/client';
 import { useToast } from '@/components/ToastProvider';
+import ChatPanel from '@/components/ChatPanel';
 
 interface Candidate {
   id: string;
@@ -1438,6 +1439,9 @@ export default function JobDashboardPage() {
           </div>
         </div>
       )}
+      
+      {/* AI Recruiter Copilot */}
+      <ChatPanel jobId={jobId} />
     </div>
   );
 }
