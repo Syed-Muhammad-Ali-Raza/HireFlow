@@ -10,15 +10,17 @@ import ChatPanel from '@/components/ChatPanel';
 interface Candidate {
   id: string;
   name: string;
-  email: string;
-  resume_file_url: string;
-  match_score: number;
-  match_reasoning: string;
+  email: string | null;
+  resume_file_url: string | null;
+  match_score: number | null;
+  match_reasoning: string | null;
   matched_skills: string[];
   missing_skills: string[];
-  status: 'new' | 'shortlisted' | 'rejected' | 'interview_scheduled' | 'offer';
+  status: 'new' | 'shortlisted' | 'interview_scheduled' | 'rejected' | 'offer';
   created_at: string;
   assigned_interviewer_ids?: string[] | null;
+  processing_status?: 'queued' | 'processing' | 'completed' | 'failed';
+  processing_error?: string | null;
 }
 
 interface JobPosting {
@@ -324,11 +326,34 @@ export default function JobDashboardPage() {
     loadData();
   }, [jobId, supabase, router]);
 
+  // Polling for candidates in queued/processing state
+  useEffect(() => {
+    const hasActiveProcessing = candidates.some(
+      c => c.processing_status === 'queued' || c.processing_status === 'processing'
+    );
+
+    if (!hasActiveProcessing) return;
+
+    const interval = setInterval(() => {
+      refreshCandidates();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [candidates, jobId]);
+
   const refreshCandidates = async () => {
     const candRes = await fetch(`/api/jobs/${jobId}/candidates`);
     const candData = await candRes.json();
     if (candRes.ok) {
       setCandidates(candData);
+      
+      // Update selected candidate details if open and details changed
+      if (selectedCandidate) {
+        const current = candData.find((c: Candidate) => c.id === selectedCandidate.id);
+        if (current && (current.processing_status !== selectedCandidate.processing_status || current.match_score !== selectedCandidate.match_score)) {
+          setSelectedCandidate(current);
+        }
+      }
     }
   };
 
@@ -348,54 +373,51 @@ export default function JobDashboardPage() {
 
     setUploadQueue(prev => [...newTasks, ...prev]);
 
-    // Process tasks sequentially or in parallel
-    for (const task of newTasks) {
-      const targetFile = files.find(f => f.name === task.fileName);
-      if (!targetFile) continue;
+    // Process tasks concurrently (parallel upload + async ranking)
+    await Promise.all(
+      newTasks.map(async (task) => {
+        const targetFile = files.find(f => f.name === task.fileName);
+        if (!targetFile) return;
 
-      try {
-        // Step 1: Uploading state
-        setUploadQueue(prev =>
-          prev.map(t => (t.id === task.id ? { ...t, status: 'parsing' } : t))
-        );
+        try {
+          // Set state to uploading/parsing
+          setUploadQueue(prev =>
+            prev.map(t => (t.id === task.id ? { ...t, status: 'parsing' } : t))
+          );
 
-        const formData = new FormData();
-        formData.append('file', targetFile);
+          const formData = new FormData();
+          formData.append('file', targetFile);
 
-        // Step 2: Ranking state
-        setUploadQueue(prev =>
-          prev.map(t => (t.id === task.id ? { ...t, status: 'ranking' } : t))
-        );
+          const res = await fetch(`/api/jobs/${jobId}/candidates`, {
+            method: 'POST',
+            body: formData,
+          });
 
-        const res = await fetch(`/api/jobs/${jobId}/candidates`, {
-          method: 'POST',
-          body: formData,
-        });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Failed to upload candidate');
 
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Failed to rank candidate');
+          setUploadQueue(prev =>
+            prev.map(t =>
+              t.id === task.id
+                ? { ...t, status: 'success', score: data.match_score || undefined }
+                : t
+            )
+          );
 
-        setUploadQueue(prev =>
-          prev.map(t =>
-            t.id === task.id
-              ? { ...t, status: 'success', score: data.match_score }
-              : t
-          )
-        );
-
-        // Refresh list
-        refreshCandidates();
-      } catch (err: any) {
-        console.error('Upload task error:', err);
-        setUploadQueue(prev =>
-          prev.map(t =>
-            t.id === task.id
-              ? { ...t, status: 'failed', errorMessage: err.message || 'Failed' }
-              : t
-          )
-        );
-      }
-    }
+          // Refresh list immediately to show candidate in queued state
+          refreshCandidates();
+        } catch (err: any) {
+          console.error('Upload task error:', err);
+          setUploadQueue(prev =>
+            prev.map(t =>
+              t.id === task.id
+                ? { ...t, status: 'failed', errorMessage: err.message || 'Failed' }
+                : t
+            )
+          );
+        }
+      })
+    );
   };
 
   // Status Modifiers
@@ -425,7 +447,7 @@ export default function JobDashboardPage() {
   const handleOpenOverride = (candidate: Candidate, e: React.MouseEvent) => {
     e.stopPropagation();
     setOverrideCandidate(candidate);
-    setOverrideScore(candidate.match_score.toString());
+    setOverrideScore(candidate.match_score !== null && candidate.match_score !== undefined ? candidate.match_score.toString() : '0');
     setOverrideReason(candidate.match_reasoning || '');
     setIsOverrideModalOpen(true);
   };
@@ -473,13 +495,14 @@ export default function JobDashboardPage() {
       return matchesSearch && matchesStatus;
     })
     .sort((a, b) => {
-      if (sortBy === 'score') return b.match_score - a.match_score;
+      if (sortBy === 'score') return (b.match_score ?? 0) - (a.match_score ?? 0);
       if (sortBy === 'name') return a.name.localeCompare(b.name);
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
 
   // Score badge color helper
-  const getScoreBadgeStyles = (score: number) => {
+  const getScoreBadgeStyles = (score: number | null | undefined) => {
+    if (score === null || score === undefined) return 'bg-slate-500/10 text-slate-400 border-slate-500/20';
     if (score >= 80) return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
     if (score >= 50) return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
     return 'bg-red-500/10 text-red-400 border-red-500/20';
@@ -745,10 +768,27 @@ export default function JobDashboardPage() {
                       >
                         <div className="flex items-center space-x-4">
                           {/* Score Circle Badge */}
-                          <div className={`h-12 w-12 rounded-xl flex flex-col items-center justify-center border font-display font-extrabold shrink-0 shadow-inner ${getScoreBadgeStyles(cand.match_score)}`}>
-                            <span className="text-sm">{cand.match_score}</span>
-                            <span className="text-[7px] uppercase tracking-wider font-semibold opacity-70">match</span>
-                          </div>
+                          {cand.processing_status === 'queued' || cand.processing_status === 'processing' ? (
+                            <div className="h-12 w-12 rounded-xl flex flex-col items-center justify-center border border-violet-500/20 bg-violet-500/5 text-violet-400 shrink-0 shadow-inner">
+                              <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                              </svg>
+                              <span className="text-[6px] uppercase tracking-wider font-semibold opacity-70 mt-1">ranking</span>
+                            </div>
+                          ) : cand.processing_status === 'failed' ? (
+                            <div className="h-12 w-12 rounded-xl flex flex-col items-center justify-center border border-red-500/20 bg-red-500/5 text-red-400 shrink-0 shadow-inner" title={cand.processing_error || 'Failed to process resume'}>
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                              </svg>
+                              <span className="text-[6px] uppercase tracking-wider font-semibold opacity-70 mt-1">failed</span>
+                            </div>
+                          ) : (
+                            <div className={`h-12 w-12 rounded-xl flex flex-col items-center justify-center border font-display font-extrabold shrink-0 shadow-inner ${getScoreBadgeStyles(cand.match_score)}`}>
+                              <span className="text-sm">{cand.match_score}</span>
+                              <span className="text-[7px] uppercase tracking-wider font-semibold opacity-70">match</span>
+                            </div>
+                          )}
 
                           {/* Details */}
                           <div>
@@ -884,9 +924,23 @@ export default function JobDashboardPage() {
                               <span className="font-bold text-white text-xs group-hover:text-violet-400 transition-colors truncate max-w-[100px]">
                                 {cand.name}
                               </span>
-                              <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded shrink-0 ${getScoreBadgeStyles(cand.match_score)}`}>
-                                {cand.match_score}%
-                              </span>
+                              {cand.processing_status === 'queued' || cand.processing_status === 'processing' ? (
+                                <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded shrink-0 bg-violet-950/40 text-violet-400 border border-violet-900/40 flex items-center gap-1">
+                                  <svg className="animate-spin h-2.5 w-2.5" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                  </svg>
+                                  AI
+                                </span>
+                              ) : cand.processing_status === 'failed' ? (
+                                <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded shrink-0 bg-red-950/40 text-red-400 border border-red-900/40 flex items-center gap-0.5" title={cand.processing_error || 'Failed to process resume'}>
+                                  Err
+                                </span>
+                              ) : (
+                                <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded shrink-0 ${getScoreBadgeStyles(cand.match_score)}`}>
+                                  {cand.match_score}%
+                                </span>
+                              )}
                             </div>
                             <p className="text-[10px] text-slate-500 truncate mt-1">{cand.email || 'No email'}</p>
 
@@ -963,10 +1017,27 @@ export default function JobDashboardPage() {
             {/* Header */}
             <div className="flex justify-between items-start border-b border-slate-800 pb-5 shrink-0">
               <div className="flex items-center space-x-3.5">
-                <div className={`h-12 w-12 rounded-xl flex flex-col items-center justify-center border font-display font-extrabold shadow-inner ${getScoreBadgeStyles(selectedCandidate.match_score)}`}>
-                  <span className="text-sm">{selectedCandidate.match_score}</span>
-                  <span className="text-[7px] uppercase tracking-wider font-semibold opacity-70">match</span>
-                </div>
+                {selectedCandidate.processing_status === 'queued' || selectedCandidate.processing_status === 'processing' ? (
+                  <div className="h-12 w-12 rounded-xl flex flex-col items-center justify-center border border-violet-500/20 bg-violet-500/5 text-violet-400 shrink-0 shadow-inner">
+                    <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span className="text-[6px] uppercase tracking-wider font-semibold opacity-70 mt-1">ranking</span>
+                  </div>
+                ) : selectedCandidate.processing_status === 'failed' ? (
+                  <div className="h-12 w-12 rounded-xl flex flex-col items-center justify-center border border-red-500/20 bg-red-500/5 text-red-400 shrink-0 shadow-inner" title={selectedCandidate.processing_error || 'Failed to process resume'}>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <span className="text-[6px] uppercase tracking-wider font-semibold opacity-70 mt-1">failed</span>
+                  </div>
+                ) : (
+                  <div className={`h-12 w-12 rounded-xl flex flex-col items-center justify-center border font-display font-extrabold shadow-inner ${getScoreBadgeStyles(selectedCandidate.match_score)}`}>
+                    <span className="text-sm">{selectedCandidate.match_score}</span>
+                    <span className="text-[7px] uppercase tracking-wider font-semibold opacity-70">match</span>
+                  </div>
+                )}
                 <div>
                   <h3 className="text-xl font-bold text-white leading-snug">{selectedCandidate.name}</h3>
                   <p className="text-xs text-slate-500 font-medium">{selectedCandidate.email || 'No email provided'}</p>
@@ -1016,7 +1087,11 @@ export default function JobDashboardPage() {
                   <div className="space-y-2">
                     <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">AI Match Reasoning</h4>
                     <p className="text-sm text-slate-300 leading-relaxed bg-slate-950/40 border border-slate-950 p-4 rounded-2xl whitespace-pre-wrap">
-                      {selectedCandidate.match_reasoning}
+                      {selectedCandidate.processing_status === 'queued' || selectedCandidate.processing_status === 'processing'
+                        ? 'AI match evaluation in progress... Please wait.'
+                        : selectedCandidate.processing_status === 'failed'
+                        ? `AI evaluation failed: ${selectedCandidate.processing_error || 'Unknown error'}`
+                        : selectedCandidate.match_reasoning || 'No match reasoning available.'}
                     </p>
                   </div>
 
@@ -1024,7 +1099,9 @@ export default function JobDashboardPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-emerald-950/10 border border-emerald-900/20 p-4.5 rounded-2xl flex flex-col">
                       <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2.5">Matched Skills</span>
-                      {selectedCandidate.matched_skills.length === 0 ? (
+                      {selectedCandidate.processing_status === 'queued' || selectedCandidate.processing_status === 'processing' ? (
+                        <span className="text-xs text-slate-500 font-medium animate-pulse">Extracting...</span>
+                      ) : (selectedCandidate.matched_skills || []).length === 0 ? (
                         <span className="text-xs text-slate-500 font-medium">None identified</span>
                       ) : (
                         <div className="flex flex-wrap gap-1.5">
@@ -1039,7 +1116,9 @@ export default function JobDashboardPage() {
 
                     <div className="bg-red-950/10 border border-red-900/20 p-4.5 rounded-2xl flex flex-col">
                       <span className="text-xs font-bold text-red-400 uppercase tracking-wider mb-2.5">Missing Skills</span>
-                      {selectedCandidate.missing_skills.length === 0 ? (
+                      {selectedCandidate.processing_status === 'queued' || selectedCandidate.processing_status === 'processing' ? (
+                        <span className="text-xs text-slate-500 font-medium animate-pulse">Extracting...</span>
+                      ) : (selectedCandidate.missing_skills || []).length === 0 ? (
                         <span className="text-xs text-slate-500 font-medium">None identified</span>
                       ) : (
                         <div className="flex flex-wrap gap-1.5">

@@ -685,3 +685,17 @@ create policy "Allow company members to insert messages in their company's threa
         )
     );
 
+
+-- =========================================================================
+-- PHASE 3 EXTENSION: BACKGROUND QUEUE SUPPORT (migration_phase3_background_queue.sql)
+-- =========================================================================
+
+-- 1. Add processing columns to Candidates table
+ALTER TABLE public.candidates
+ADD COLUMN IF NOT EXISTS processing_status text DEFAULT 'completed' CHECK (processing_status IN ('queued', 'processing', 'completed', 'failed')) NOT NULL,
+ADD COLUMN IF NOT EXISTS processing_error text;
+
+-- 2. Create index for performance on processing_status
+CREATE INDEX IF NOT EXISTS idx_candidates_processing_status ON public.candidates(processing_status);
+
+

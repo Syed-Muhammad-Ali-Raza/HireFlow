@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/utils/supabase/server';
 import { extractTextFromPdf } from '@/lib/pdf';
 import { evaluateResume } from '@/lib/ai';
@@ -114,22 +115,13 @@ export async function POST(
       fileUrl = `/uploads/${storagePath}`;
     }
 
-    // 6. Run AI Ranking (Claude / Gemini)
-    let aiEvaluation;
-    try {
-      aiEvaluation = await evaluateResume(job.description, resumeText);
-    } catch (aiErr: any) {
-      console.error('AI ranking error:', aiErr);
-      return NextResponse.json({ error: `AI ranking failed: ${aiErr.message}` }, { status: 502 });
-    }
-
     // Prefer form inputs → resume text extraction → filename stem
     const extracted = extractContactFromResume(resumeText);
     const filenameStem = file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ').trim();
     const candidateName = nameInput?.trim() || extracted.name || filenameStem || 'Unknown Candidate';
     const candidateEmail = emailInput?.trim() || extracted.email || '';
 
-    // 7. Save candidate records in DB
+    // 6. Save candidate records in DB with processing_status = 'queued'
     const { data: candidate, error: saveError } = await supabase
       .from('candidates')
       .insert({
@@ -138,11 +130,12 @@ export async function POST(
         email: candidateEmail,
         resume_file_url: fileUrl,
         resume_text: resumeText,
-        match_score: aiEvaluation.match_score,
-        match_reasoning: aiEvaluation.match_reasoning,
-        matched_skills: aiEvaluation.matched_skills,
-        missing_skills: aiEvaluation.missing_skills,
+        match_score: null,
+        match_reasoning: null,
+        matched_skills: [],
+        missing_skills: [],
         status: 'new',
+        processing_status: 'queued',
       })
       .select()
       .single();
@@ -151,6 +144,52 @@ export async function POST(
       console.error('Database save error:', saveError);
       return NextResponse.json({ error: saveError.message }, { status: 500 });
     }
+
+    // 7. Trigger AI Ranking in background using Next.js 15's after API
+    after(async () => {
+      // Create an admin client to perform the update bypassing client RLS/session limits in background task
+      const adminClient = createSupabaseClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        { auth: { persistSession: false, autoRefreshToken: false } }
+      );
+
+      try {
+        // Update status to processing
+        await adminClient
+          .from('candidates')
+          .update({ processing_status: 'processing' })
+          .eq('id', candidate.id);
+
+        // Run AI evaluation
+        const aiEvaluation = await evaluateResume(job.description, resumeText);
+
+        // Update DB with results and completed status
+        const { error: updateError } = await adminClient
+          .from('candidates')
+          .update({
+            match_score: aiEvaluation.match_score,
+            match_reasoning: aiEvaluation.match_reasoning,
+            matched_skills: aiEvaluation.matched_skills,
+            missing_skills: aiEvaluation.missing_skills,
+            processing_status: 'completed'
+          })
+          .eq('id', candidate.id);
+
+        if (updateError) {
+          throw updateError;
+        }
+      } catch (error: any) {
+        console.error(`Background resume ranking failed for candidate ${candidate.id}:`, error);
+        await adminClient
+          .from('candidates')
+          .update({
+            processing_status: 'failed',
+            processing_error: error.message || 'Unknown background processing error'
+          })
+          .eq('id', candidate.id);
+      }
+    });
 
     return NextResponse.json(candidate, { status: 201 });
   } catch (error: any) {
