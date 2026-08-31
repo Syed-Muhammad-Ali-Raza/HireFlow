@@ -213,3 +213,182 @@ export async function createGoogleEvent(
     meetingLink,
   };
 }
+
+// =============================================================================
+// OUTLOOK / MICROSOFT GRAPH API
+// =============================================================================
+
+/**
+ * Generates the redirect URL for Microsoft OAuth consent screen
+ */
+export function getOutlookOAuthUrl(stateUserId: string): string {
+  const rootUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+
+  const options = {
+    client_id: process.env.OUTLOOK_CLIENT_ID || '',
+    redirect_uri: `${appUrl}/api/calendar/outlook/callback`,
+    response_type: 'code',
+    scope: 'Calendars.ReadWrite offline_access User.Read',
+    state: stateUserId,
+  };
+
+  const qs = new URLSearchParams(options);
+  return `${rootUrl}?${qs.toString()}`;
+}
+
+/**
+ * Exchange Outlook auth code for tokens
+ */
+export async function exchangeOutlookCode(code: string) {
+  const url = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+
+  const params = new URLSearchParams();
+  params.set('code', code);
+  params.set('client_id', process.env.OUTLOOK_CLIENT_ID || '');
+  params.set('client_secret', process.env.OUTLOOK_CLIENT_SECRET || '');
+  params.set('redirect_uri', `${appUrl}/api/calendar/outlook/callback`);
+  params.set('grant_type', 'authorization_code');
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params,
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error_description || data.error || 'Failed to exchange Outlook auth code.');
+  }
+
+  return data;
+}
+
+/**
+ * Refresh an expired Outlook access token
+ */
+export async function refreshOutlookAccessToken(refreshToken: string): Promise<string> {
+  const url = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+
+  const params = new URLSearchParams();
+  params.set('client_id', process.env.OUTLOOK_CLIENT_ID || '');
+  params.set('client_secret', process.env.OUTLOOK_CLIENT_SECRET || '');
+  params.set('refresh_token', refreshToken);
+  params.set('grant_type', 'refresh_token');
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params,
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error_description || 'Failed to refresh Outlook access token.');
+  }
+
+  return data.access_token;
+}
+
+/**
+ * Queries Free/Busy availability for an Outlook calendar via Microsoft Graph
+ */
+export async function getOutlookFreeBusy(
+  accessToken: string,
+  email: string,
+  timeMin: string,
+  timeMax: string
+): Promise<{ start: string; end: string }[]> {
+  const url = 'https://graph.microsoft.com/v1.0/me/freeBusy';
+
+  const body = {
+    schedules: [email],
+    startDateTime: timeMin,
+    endDateTime: timeMax,
+    scheduleViewOptions: { segmentsPerInterval: 6 },
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error?.message || 'Failed to fetch Outlook freebusy data.');
+  }
+
+  const schedule = data.value?.[0]?.schedule;
+  if (!schedule) return [];
+
+  return schedule.map((entry: any) => ({
+    start: entry.start.dateTime,
+    end: entry.end.dateTime,
+  }));
+}
+
+/**
+ * Creates a Calendar Event with an Outlook Meet link via Microsoft Graph
+ */
+export async function createOutlookEvent(
+  accessToken: string,
+  eventDetails: {
+    summary: string;
+    description: string;
+    start: string;
+    end: string;
+    attendeeEmails: string[];
+  }
+): Promise<{ eventId: string; meetingLink: string }> {
+  const url = 'https://graph.microsoft.com/v1.0/me/events';
+
+  const attendeeArray = eventDetails.attendeeEmails.map((email) => ({
+    emailAddress: { address: email },
+    type: 'required',
+  }));
+
+  const body = {
+    subject: eventDetails.summary,
+    body: {
+      contentType: 'text',
+      content: eventDetails.description,
+    },
+    start: {
+      dateTime: eventDetails.start,
+      timeZone: 'UTC',
+    },
+    end: {
+      dateTime: eventDetails.end,
+      timeZone: 'UTC',
+    },
+    attendees: attendeeArray,
+    isOnlineMeeting: true,
+    onlineMeetingProvider: 'teamsForBusiness',
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error?.message || 'Failed to create Outlook calendar event.');
+  }
+
+  const meetingLink = data.onlineMeeting?.joinUrl || '';
+
+  return {
+    eventId: data.id || '',
+    meetingLink,
+  };
+}
