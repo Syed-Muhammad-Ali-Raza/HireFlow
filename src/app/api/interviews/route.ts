@@ -1,11 +1,41 @@
 import { NextResponse } from 'next/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/utils/supabase/server';
-import { decryptToken, refreshGoogleAccessToken, createGoogleEvent } from '@/lib/calendar';
+import { decryptToken, refreshGoogleAccessToken, createGoogleEvent, refreshOutlookAccessToken, createOutlookEvent } from '@/lib/calendar';
 import { assertBookingAccess } from '@/lib/booking';
 import { checkRateLimit, clientIp } from '@/lib/rate-limit';
 import { createAuditLog } from '@/lib/audit';
 import { sendInterviewConfirmationEmail } from '@/lib/email';
+
+interface CalendarProfile {
+  id: string;
+  email: string;
+  name: string;
+  calendar_connected: boolean;
+  calendar_provider: string | null;
+  calendar_refresh_token: string | null;
+}
+
+async function createCalendarEvent(
+  profile: CalendarProfile,
+  eventDetails: {
+    summary: string;
+    description: string;
+    start: string;
+    end: string;
+    attendeeEmails: string[];
+  }
+): Promise<{ eventId: string; meetingLink: string }> {
+  const decryptedToken = decryptToken(profile.calendar_refresh_token!);
+
+  if (profile.calendar_provider === 'outlook') {
+    const accessToken = await refreshOutlookAccessToken(decryptedToken);
+    return createOutlookEvent(accessToken, eventDetails);
+  }
+
+  const accessToken = await refreshGoogleAccessToken(decryptedToken);
+  return createGoogleEvent(accessToken, eventDetails);
+}
 
 // GET: Fetch all interviews for current user's company
 export async function GET() {
@@ -104,17 +134,16 @@ export async function POST(request: Request) {
     // 4. Fetch Interviewers profile details (emails, refresh tokens)
     const { data: profiles, error: profilesError } = await supabaseAdmin
       .from('profiles')
-      .select('id, email, name, calendar_connected, calendar_refresh_token')
+      .select('id, email, name, calendar_connected, calendar_provider, calendar_refresh_token')
       .in('id', interviewer_ids);
 
     if (profilesError || !profiles || profiles.length === 0) {
       return NextResponse.json({ error: 'Failed to fetch interviewer data' }, { status: 400 });
     }
 
-    // Identify primary interviewer to host the calendar event
     const hostProfile = profiles.find(p => p.calendar_connected && p.calendar_refresh_token);
     if (!hostProfile) {
-      return NextResponse.json({ error: 'No interviewer has connected a Google Calendar profile' }, { status: 400 });
+      return NextResponse.json({ error: 'No interviewer has connected a calendar' }, { status: 400 });
     }
 
     // Collect attendee emails (other interviewers + candidate)
@@ -123,17 +152,14 @@ export async function POST(request: Request) {
       attendeeEmails.push(candidate.email);
     }
 
-    // 5. Exchange host token and create Google Calendar event
+    // 5. Exchange host token and create calendar event
     let eventData;
     try {
-      const decryptedToken = decryptToken(hostProfile.calendar_refresh_token!);
-      const accessToken = await refreshGoogleAccessToken(decryptedToken);
-
       const eventStart = new Date(scheduled_time);
       const eventEnd = new Date(eventStart);
       eventEnd.setMinutes(eventEnd.getMinutes() + durationMinutes);
 
-      eventData = await createGoogleEvent(accessToken, {
+      eventData = await createCalendarEvent(hostProfile, {
         summary: `Interview: ${candidate.name} <> ${jobTitle}`,
         description: `Scheduled via HireFlow.\nPosition: ${jobTitle}\nCandidate: ${candidate.name}\nInterviewers: ${profiles.map(p => p.name || p.email).join(', ')}`,
         start: eventStart.toISOString(),
@@ -142,7 +168,7 @@ export async function POST(request: Request) {
       });
     } catch (calError: any) {
       console.error('Calendar meeting creation error:', calError);
-      return NextResponse.json({ error: `Google Calendar creation failed: ${calError.message}` }, { status: 502 });
+      return NextResponse.json({ error: `Calendar creation failed: ${calError.message}` }, { status: 502 });
     }
 
     // 6. Save interview details in Postgres database

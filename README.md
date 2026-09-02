@@ -1,8 +1,8 @@
 # HireFlow
 
-AI-powered recruiting platform: post jobs, upload resumes, get AI match scores, and let candidates self-schedule interviews via Google Calendar.
+AI-powered recruiting platform: post jobs, upload resumes, get AI match scores, and let candidates self-schedule interviews via Google Calendar or Outlook.
 
-**Stack:** Next.js 15 · React 19 · Supabase (Auth + Postgres + Storage) · Claude / Gemini · Google Calendar
+**Stack:** Next.js 15 · React 19 · Supabase (Auth + Postgres + Storage) · Claude / Gemini · Google Calendar · Outlook
 
 ---
 
@@ -15,12 +15,17 @@ AI-powered recruiting platform: post jobs, upload resumes, get AI match scores, 
 | Resume PDF upload + text extract + AI ranking | Done |
 | Candidate pipeline statuses | Done |
 | Google Calendar connect + Meet booking | Done |
+| Outlook Calendar connect + Teams booking | Done |
 | Public candidate booking page | Done |
 | Roles (admin / interviewer / recruiter) | Enforced in API + RLS |
 | Team invites / join existing company | Done — `/settings/team` + `/invite/[token]` |
-| Outlook calendar | Schema only |
 | Interviews dashboard UI | Done — `/interviews` |
-| Product chatbot | Not built (Phase 4) |
+| AI Recruiter Copilot chatbot | Done — floating widget on `/jobs/[id]` |
+| Email notifications (Resend / SendGrid) | Done |
+| Background job queue | Done |
+| Notes & scorecards | Done |
+| Kanban pipeline view | Done |
+| Job duplicate & edit/delete | Done |
 | Docs | README + docs/SUPABASE_SETUP.md |
 
 ---
@@ -62,6 +67,11 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 # Google Calendar (Phase 2)
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
+
+# Outlook Calendar (Phase 3)
+OUTLOOK_CLIENT_ID=
+OUTLOOK_CLIENT_SECRET=
+
 CALENDAR_ENCRYPTION_KEY=  # 32-byte secret for encrypting refresh tokens
 ```
 
@@ -95,12 +105,13 @@ npm run lint    # ESLint
 
 ## Product flow (today)
 
-1. Sign up → create company  
-2. Create a job (title, skills, description)  
-3. On the job board, upload candidate PDFs → AI score + reasoning  
-4. Shortlist / reject / override score  
-5. Connect Google Calendar under **Settings → Integrations**  
-6. Copy booking link → candidate picks a free slot → Meet event created  
+1. Sign up → create company
+2. Create a job (title, skills, description)
+3. On the job board, upload candidate PDFs → AI score + reasoning
+4. Shortlist / reject / override score
+5. Connect Google Calendar or Outlook under **Settings → Integrations**
+6. Copy booking link → candidate picks a free slot → Meet / Teams event created
+7. Chat with HireFlow Copilot for candidate insights
 
 ---
 
@@ -116,10 +127,12 @@ src/
     api/                  # REST handlers
   lib/ai.ts               # Claude → Gemini → simulation
   lib/pdf.ts              # PDF text extraction
-  lib/calendar.ts         # Google OAuth + freeBusy + Meet
+  lib/calendar.ts         # Google & Outlook OAuth + freeBusy + Meet/Teams
+  lib/chat-agent.ts       # Gemini tool-calling recruiter copilot
   utils/supabase/         # Browser, server, middleware clients
 schema.sql
 migration_phase2.sql
+migration_phase3.sql
 ```
 
 ---
