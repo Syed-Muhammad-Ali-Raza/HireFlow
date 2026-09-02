@@ -15,7 +15,6 @@ function IntegrationsPageContent() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Read status params from redirect callback
     if (searchParams.get('success') === 'true') {
       setSuccess(true);
     }
@@ -59,17 +58,20 @@ function IntegrationsPageContent() {
           calendar_connected: false,
           calendar_provider: null,
           calendar_refresh_token: null,
+          calendar_access_token: null,
+          calendar_email: null,
         })
         .eq('id', session.user.id);
 
       if (updateError) throw updateError;
 
-      // Update local state
       setProfile((prev: any) => ({
         ...prev,
         calendar_connected: false,
         calendar_provider: null,
         calendar_refresh_token: null,
+        calendar_access_token: null,
+        calendar_email: null,
       }));
       setSuccess(false);
       setError(null);
@@ -93,10 +95,8 @@ function IntegrationsPageContent() {
 
   return (
     <div className="flex-1 flex flex-col bg-slate-950 relative overflow-hidden">
-      {/* Background Orbs */}
       <div className="absolute top-[-10%] left-[-10%] w-[45%] h-[45%] rounded-full bg-violet-600/5 blur-[120px] pointer-events-none" />
 
-      {/* Navigation */}
       <nav className="relative z-10 border-b border-slate-900 bg-slate-950/60 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
@@ -116,21 +116,19 @@ function IntegrationsPageContent() {
         </div>
       </nav>
 
-      {/* Settings Grid */}
       <main className="flex-1 max-w-4xl mx-auto w-full px-6 py-10 relative z-10">
         <div className="pb-6 border-b border-slate-900">
           <h1 className="text-3xl font-display font-extrabold text-white tracking-tight">Settings & Integrations</h1>
           <p className="text-sm text-slate-400 mt-1">Manage connected services for schedule checking and interview booking.</p>
         </div>
 
-        {/* Success/Error Alerts */}
         <div className="mt-6 space-y-4">
           {success && (
             <div className="rounded-xl bg-emerald-950/40 border border-emerald-900/40 p-4 flex items-center text-sm text-emerald-400 font-medium">
               <svg className="w-5 h-5 mr-3 shrink-0 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
               </svg>
-              Google Calendar connected successfully! You can now check interviewer availability.
+              Calendar connected successfully! You can now check interviewer availability.
             </div>
           )}
 
@@ -144,11 +142,9 @@ function IntegrationsPageContent() {
           )}
         </div>
 
-        {/* Calendar Connection card */}
         <div className="mt-8 grid grid-cols-1 gap-6">
           <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-900 p-6 sm:p-8 rounded-2xl shadow-xl flex flex-col sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start space-x-4">
-              {/* Google Icon */}
               <div className="h-12 w-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center shrink-0 shadow-inner">
                 <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -162,7 +158,7 @@ function IntegrationsPageContent() {
                 <p className="text-xs text-slate-400 mt-1 max-w-md">
                   Sync interviewer calendars to check dynamic availability overlaps and directly publish calendar bookings with Google Meet video links.
                 </p>
-                {profile?.calendar_connected && (
+                {profile?.calendar_connected && profile?.calendar_provider === 'google' && (
                   <div className="inline-flex items-center space-x-2 mt-4 text-xs font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-900/40 px-3 py-1.5 rounded-xl">
                     <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
                     <span>Connected to: <strong>{profile.email}</strong></span>
@@ -172,7 +168,7 @@ function IntegrationsPageContent() {
             </div>
 
             <div className="mt-6 sm:mt-0 shrink-0">
-              {profile?.calendar_connected ? (
+              {profile?.calendar_connected && profile?.calendar_provider === 'google' ? (
                 <button
                   onClick={handleDisconnect}
                   className="w-full sm:w-auto px-5 py-2.5 border border-red-900/40 text-xs font-semibold text-red-400 bg-red-950/10 hover:bg-red-950/30 rounded-xl transition-all cursor-pointer"
@@ -185,6 +181,47 @@ function IntegrationsPageContent() {
                   className="block text-center px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 transition-all cursor-pointer shadow-lg shadow-violet-600/20"
                 >
                   Connect Google Calendar
+                </a>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-900 p-6 sm:p-8 rounded-2xl shadow-xl flex flex-col sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start space-x-4">
+              <div className="h-12 w-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center shrink-0 shadow-inner">
+                <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M0 0h24v24H0z" fill="none"/>
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 3.87-3.13 7-7 7z" fill="#0078D4"/>
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Outlook Calendar Integration</h3>
+                <p className="text-xs text-slate-400 mt-1 max-w-md">
+                  Connect your Microsoft account to check interviewer availability and schedule meetings via Outlook / Microsoft Teams.
+                </p>
+                {profile?.calendar_connected && profile?.calendar_provider === 'outlook' && (
+                  <div className="inline-flex items-center space-x-2 mt-4 text-xs font-semibold text-blue-400 bg-blue-950/40 border border-blue-900/40 px-3 py-1.5 rounded-xl">
+                    <span className="h-2 w-2 rounded-full bg-blue-400 animate-pulse" />
+                    <span>Connected to: <strong>{profile.email}</strong></span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 sm:mt-0 shrink-0">
+              {profile?.calendar_connected && profile?.calendar_provider === 'outlook' ? (
+                <button
+                  onClick={handleDisconnect}
+                  className="w-full sm:w-auto px-5 py-2.5 border border-red-900/40 text-xs font-semibold text-red-400 bg-red-950/10 hover:bg-red-950/30 rounded-xl transition-all cursor-pointer"
+                >
+                  Disconnect Account
+                </button>
+              ) : (
+                <a
+                  href="/api/calendar/outlook/connect"
+                  className="block text-center px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 transition-all cursor-pointer shadow-lg shadow-blue-600/20"
+                >
+                  Connect Outlook Calendar
                 </a>
               )}
             </div>

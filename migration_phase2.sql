@@ -6,7 +6,9 @@
 alter table public.profiles 
 add column if not exists calendar_connected boolean default false not null,
 add column if not exists calendar_provider text check (calendar_provider in ('google', 'outlook', null)),
-add column if not exists calendar_refresh_token text;
+add column if not exists calendar_access_token text,
+add column if not exists calendar_refresh_token text,
+add column if not exists calendar_email text;
 
 -- 2. Create Interviews Table
 create table if not exists public.interviews (

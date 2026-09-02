@@ -60,7 +60,9 @@ export async function GET(request: Request) {
       .update({
         calendar_connected: true,
         calendar_provider: 'google',
+        calendar_access_token: tokenData.access_token || null,
         calendar_refresh_token: encryptedToken,
+        calendar_email: profile.email,
       })
       .eq('id', state);
 

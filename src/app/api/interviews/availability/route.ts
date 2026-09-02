@@ -1,8 +1,32 @@
 import { NextResponse } from 'next/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
-import { decryptToken, refreshGoogleAccessToken, getGoogleFreeBusy } from '@/lib/calendar';
+import { decryptToken, refreshGoogleAccessToken, getGoogleFreeBusy, refreshOutlookAccessToken, getOutlookFreeBusy } from '@/lib/calendar';
 import { assertBookingAccess } from '@/lib/booking';
 import { checkRateLimit, clientIp } from '@/lib/rate-limit';
+
+interface CalendarProfile {
+  id: string;
+  email: string;
+  calendar_connected: boolean;
+  calendar_provider: string | null;
+  calendar_refresh_token: string | null;
+}
+
+async function getFreeBusyForProfile(
+  profile: CalendarProfile,
+  timeMin: string,
+  timeMax: string
+): Promise<{ start: string; end: string }[]> {
+  const decryptedToken = decryptToken(profile.calendar_refresh_token!);
+
+  if (profile.calendar_provider === 'outlook') {
+    const accessToken = await refreshOutlookAccessToken(decryptedToken);
+    return getOutlookFreeBusy(accessToken, profile.email, timeMin, timeMax);
+  }
+
+  const accessToken = await refreshGoogleAccessToken(decryptedToken);
+  return getGoogleFreeBusy(accessToken, profile.email, timeMin, timeMax);
+}
 
 export async function POST(request: Request) {
   try {
@@ -32,16 +56,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: tokenError }, { status: 403 });
     }
 
-    // 1. Initialize Supabase Admin to read profiles refresh tokens
     const supabaseAdmin = createSupabaseClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // 2. Fetch all interviewers' tokens and emails
     const { data: profiles, error: profilesError } = await supabaseAdmin
       .from('profiles')
-      .select('id, email, calendar_connected, calendar_refresh_token')
+      .select('id, email, calendar_connected, calendar_provider, calendar_refresh_token')
       .in('id', interviewer_ids);
 
     if (profilesError || !profiles || profiles.length === 0) {
@@ -53,47 +75,39 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No interviewers have connected calendars' }, { status: 400 });
     }
 
-    // 3. Define the scheduling window (e.g. next 5 days, starting tomorrow)
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() + 1); // Start tomorrow
-    startDate.setHours(9, 0, 0, 0); // start at 9:00 AM
+    startDate.setDate(startDate.getDate() + 1);
+    startDate.setHours(9, 0, 0, 0);
 
     const endDate = new Date(startDate);
-    endDate.setDate(endDate.getDate() + 5); // search up to 5 days ahead
-    endDate.setHours(17, 0, 0, 0); // end at 5:00 PM
+    endDate.setDate(endDate.getDate() + 5);
+    endDate.setHours(17, 0, 0, 0);
 
     const timeMin = startDate.toISOString();
     const timeMax = endDate.toISOString();
 
-    // 4. Query busy periods for each interviewer in parallel
     const busyIntervalsList: { start: string; end: string }[][] = [];
 
     for (const profile of connectedProfiles) {
       try {
-        const decryptedToken = decryptToken(profile.calendar_refresh_token!);
-        const accessToken = await refreshGoogleAccessToken(decryptedToken);
-        const busy = await getGoogleFreeBusy(accessToken, profile.email, timeMin, timeMax);
+        const busy = await getFreeBusyForProfile(profile, timeMin, timeMax);
         busyIntervalsList.push(busy);
       } catch (tokenErr) {
         console.error(`Failed to fetch calendar data for interviewer ${profile.email}:`, tokenErr);
-        // If one interviewer has connection failure, we continue with others or throw
         return NextResponse.json({ error: `Interviewer ${profile.email} calendar could not be queried` }, { status: 502 });
       }
     }
 
-    // 5. Generate possible slot starts in 30-minute intervals
     const possibleSlots: Date[] = [];
     let currentSlot = new Date(startDate);
 
     while (currentSlot < endDate) {
-      // Check if slot falls inside business hours in target timezone
       if (isBusinessHours(currentSlot, timezone)) {
         possibleSlots.push(new Date(currentSlot));
       }
       currentSlot.setMinutes(currentSlot.getMinutes() + 30);
     }
 
-    // Filter slots that do not overlap with any busy intervals
     const availableSlots: string[] = [];
 
     for (const slotStart of possibleSlots) {
@@ -102,13 +116,11 @@ export async function POST(request: Request) {
 
       let isOverlap = false;
 
-      // Check against all busy intervals of all interviewers
       for (const busyList of busyIntervalsList) {
         for (const busy of busyList) {
           const busyStart = new Date(busy.start);
           const busyEnd = new Date(busy.end);
 
-          // Overlap check: slotStart < busyEnd AND slotEnd > busyStart
           if (slotStart < busyEnd && slotEnd > busyStart) {
             isOverlap = true;
             break;
@@ -129,7 +141,6 @@ export async function POST(request: Request) {
   }
 }
 
-// Timezone business hour helpers
 function getHourInTimezone(date: Date, tz: string): number {
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
@@ -143,15 +154,12 @@ function isBusinessHours(date: Date, tz: string): boolean {
   try {
     const formatterDay = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' });
     const day = formatterDay.format(date);
-    
-    // Skip weekends
+
     if (day === 'Sat' || day === 'Sun') return false;
 
     const hour = getHourInTimezone(date, tz);
-    // Business hours between 9:00 AM and 5:00 PM (17:00)
     return hour >= 9 && hour < 17;
   } catch (err) {
-    // If invalid timezone, default to UTC
     const hour = date.getUTCHours();
     const day = date.getUTCDay();
     if (day === 0 || day === 6) return false;
